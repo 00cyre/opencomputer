@@ -2,7 +2,7 @@
 
 <p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-0.2.1-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
 
-<p align="center"><a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
+<p align="center"><a href="#watch-it-work">Watch demo</a> · <a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
 
 <p align="center">
 <a href="https://github.com/00cyre/opencomputer/actions/workflows/ci.yml"><img src="https://github.com/00cyre/opencomputer/actions/workflows/ci.yml/badge.svg" alt="Build and tests"></a>
@@ -13,6 +13,18 @@
 
 **OpenComputer gives AI agents a local interface for working with Mac apps in the background.** Discover apps, read their accessibility trees, change controls, and capture a specific window. Connect it to an MCP client or use the JavaScript API directly. No OpenComputer account, API key, cloud service, or npm dependencies.
 
+## Watch it work
+
+A 27-second showcase with narration, sound effects, and music. Click the preview to watch with sound.
+
+[![OpenComputer: hover details and smooth ghost cursor](docs/assets/showcase.gif)](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4)
+
+[**Watch with sound · 27 seconds**](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4) · [Vertical social cut](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-9x16.mp4) · [Editable Hyperframes projects](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-Hyperframes.zip)
+
+Actual native UI with choreographed demo actions. [Recording details](docs/SHOWCASE.md).
+
+## Background control, visible activity
+
 Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chatgpt.com/docs/computer-use). This is an independent implementation using public macOS APIs. It is **not a drop-in replacement for OpenAI's private runtime**, and it does not provide ChatGPT's approval system or locked-Mac access.
 
 | For your agent | For your desktop |
@@ -22,14 +34,6 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
 | Native actions with verification metadata. | Focus changes pause further writes; raw keyboard injection is disabled. |
 | Agent identity and current action. | Three animated dots expand on hover; a ghost cursor marks the visible target. |
-
-## Watch it work
-
-[![OpenComputer: hover details and smooth ghost cursor](docs/assets/showcase.gif)](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4)
-
-[Watch the narrated 27-second demo](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4) · [Vertical social cut](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-9x16.mp4) · [Editable Hyperframes projects](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-Hyperframes.zip)
-
-Actual native UI with choreographed demo actions. [Recording details](docs/SHOWCASE.md).
 
 ## Get started
 
