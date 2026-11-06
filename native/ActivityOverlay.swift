@@ -130,6 +130,7 @@ final class ActivityOverlay {
     var row = 0
     var offset: CGFloat = 0
     var timer: Timer?
+    var ghostMotion = GhostMotion()
     var enabled = ProcessInfo.processInfo.environment["OPENCOMPUTER_OVERLAY"] != "0"
     var registryReady = false
     let pointerLocation: () -> NSPoint
@@ -149,7 +150,7 @@ final class ActivityOverlay {
             registryReady = attrs[.type] as? FileAttributeType == .typeDirectory && (attrs[.ownerAccountID] as? NSNumber)?.uint32Value == getuid()
         } catch { registryReady = false }
         configure(ProcessInfo.processInfo.environment["OPENCOMPUTER_AGENT"] ?? "Agent")
-        timer = Timer.scheduledTimer(withTimeInterval:0.05,repeats:true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
+        timer = Timer.scheduledTimer(withTimeInterval:1.0/60.0,repeats:true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
     }
     func configure(_ label: String) {
         view.agent = AgentIdentity(label); view.agentIcon = view.agent.icon; ghostView.tint = view.agent.color
@@ -191,6 +192,7 @@ final class ActivityOverlay {
     func release() {
         active = false; app = nil; window = nil; pointOffset = nil; windowID = nil
         panel.orderOut(nil); ghost.orderOut(nil); view.expanded = false
+        ghostMotion = GhostMotion()
         if registryReady { try? FileManager.default.removeItem(at:sessionURL) }
     }
     func shutdown() { timer?.invalidate(); timer = nil; release() }
@@ -235,6 +237,7 @@ final class ActivityOverlay {
         if Date().timeIntervalSince(lastWindowRefresh) >= 0.15 {
             lastWindowRefresh = Date(); refreshGhost()
         }
+        if ghost.isVisible, let point = ghostMotion.position(at:Date.timeIntervalSinceReferenceDate) { ghost.setFrameOrigin(point) }
         ghostView.needsDisplay = true
     }
     func refreshGhost() {
@@ -267,12 +270,14 @@ final class ActivityOverlay {
         ghostReason = visible ? "visible" : !onScreen ? "offscreen" : result != .success ? "hit-test-unavailable" : "occluded"
         guard visible, let primary = NSScreen.screens.first else { ghost.orderOut(nil); return }
         let cocoa = CGPoint(x:point.x,y:primary.frame.maxY-point.y)
-        ghost.setFrameOrigin(NSPoint(x:cocoa.x-9,y:cocoa.y-ghost.frame.height+5))
+        let origin = NSPoint(x:cocoa.x-9,y:cocoa.y-ghost.frame.height+5)
+        ghostMotion.move(to:origin,at:Date.timeIntervalSinceReferenceDate,snap:!ghost.isVisible)
+        if let point = ghostMotion.position(at:Date.timeIntervalSinceReferenceDate) { ghost.setFrameOrigin(point) }
         if !ghost.isVisible { ghost.orderFrontRegardless() }
     }
     func state() -> [String:Any] {
         ["enabled":enabled,"active":active,"agent":view.agent.name,"app":app?.bundleIdentifier ?? "", "action":view.action,
-         "pillVisible":panel.isVisible,"ghostVisible":ghost.isVisible,"ghostReason":ghostReason,"expanded":view.expanded,"stackRow":row,
+         "pillVisible":panel.isVisible,"ghostVisible":ghost.isVisible,"ghostFloating":ghost.isVisible && ghostMotion.isFloating(at:Date.timeIntervalSinceReferenceDate),"ghostReason":ghostReason,"expanded":view.expanded,"stackRow":row,
          "nonActivating":!panel.canBecomeKey && !panel.canBecomeMain && !ghost.canBecomeKey,
          "clickThrough":panel.ignoresMouseEvents && ghost.ignoresMouseEvents,
          "pillWindowId":panel.windowNumber,"ghostWindowId":ghost.windowNumber,

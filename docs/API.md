@@ -51,7 +51,7 @@ If focus changes, the action returns `FOCUS_CHANGED` and may already have execut
 
 ## Activity state
 
-Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `pillVisible`, `expanded`, `ghostVisible`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, and helper window IDs/geometry for diagnostics. These are current observations, not a persistent activity log. See [activity behavior](ACTIVITY.md).
+Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, and helper window IDs/geometry for diagnostics. These are current observations, not a persistent activity log. See [activity behavior](ACTIVITY.md).
 
 ## MCP
 

@@ -33,10 +33,11 @@ struct OverlayUITest {
             }
             do {
                 try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
+                try? FileManager.default.removeItem(at:dir.appendingPathComponent("fixture.json"))
                 try fixture.run()
                 var target: NSRunningApplication?
                 for _ in 0..<50 {
-                    target = NSRunningApplication.runningApplications(withBundleIdentifier:"cc.opencomputer.fixture").first
+                    target = NSRunningApplication(processIdentifier:fixture.processIdentifier)
                     if target != nil && FileManager.default.fileExists(atPath:dir.appendingPathComponent("fixture.json").path) { break }
                     try await Task.sleep(nanoseconds:100_000_000)
                 }

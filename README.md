@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="OpenComputer — let your agent work. Keep your desktop." width="100%"></p>
 
-<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.2.0/OpenComputer-0.2.0-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
+<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-0.2.1-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
 
 <p align="center"><a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
 
@@ -23,11 +23,19 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 | Native actions with verification metadata. | Focus changes pause further writes; raw keyboard injection is disabled. |
 | Agent identity and current action. | Three animated dots expand on hover; a ghost cursor marks the visible target. |
 
+## Watch it work
+
+[![OpenComputer: hover details and smooth ghost cursor](docs/assets/showcase.gif)](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4)
+
+[Watch the full 31-second demo](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-16x9.mp4) · [Vertical social cut](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-9x16.mp4) · [Editable Hyperframes projects](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-Showcase-Hyperframes.zip)
+
+Actual native UI with choreographed demo actions. [Recording details](docs/SHOWCASE.md).
+
 ## Get started
 
 **macOS 14+ · Node.js 22+ · Apple Silicon or Intel**
 
-1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.2.0/OpenComputer-0.2.0-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
+1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/OpenComputer-0.2.1-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
 2. In that folder, run `node bin/opencomputer.mjs doctor`. Approve Accessibility and Screen Recording for the launching host in **System Settings → Privacy & Security**, then restart that host if needed. [Permission help](docs/INSTALL.md#macos-permissions).
 3. Add the MCP server to your agent using its documented configuration. Start with one app you intend to automate:
 
@@ -47,7 +55,7 @@ Ask your agent to inspect a disposable TextEdit document. Have it read the curre
 
 > **Developer runtime:** the native helper is ad-hoc signed, not Apple-notarized. macOS may block downloaded binaries. Follow the normal macOS approval flow or [build from source](docs/DEVELOPMENT.md); OpenComputer never disables Gatekeeper. This release is a developer runtime, not a graphical installer.
 
-[Checksums](https://github.com/00cyre/opencomputer/releases/download/v0.2.0/SHA256SUMS.txt) · [Claude and Grok setup](docs/INSTALL.md) · [Release notes](CHANGELOG.md)
+[Checksums](https://github.com/00cyre/opencomputer/releases/download/v0.2.1/SHA256SUMS.txt) · [Claude and Grok setup](docs/INSTALL.md) · [Release notes](CHANGELOG.md)
 
 ## See what your agent is doing
 
@@ -55,7 +63,7 @@ A small **three-dot animation** sits at the top right while an agent has an app 
 
 ![Expanded activity indicator from the live macOS UI test](docs/assets/activity-expanded.png)
 
-The colored ghost cursor appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
+The colored ghost cursor eases between targets and gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
 
 ## A familiar interface
 
@@ -95,7 +103,7 @@ The app allowlist is a process-level control, not a sandbox against an agent tha
 
 ## Tested with Claude and Grok
 
-Both installed clients completed the same native fixture task through MCP: fill a field, enable an option, submit once, verify, and capture a window. Each used 11 tool calls with zero errors, preserved focus, displayed the right agent identity, and removed the overlays with `release`. Ten unit tests and 48 native integration/activity/UI/focus assertions passed. [Results, methodology, and limitations](docs/BENCHMARKS.md).
+Both installed clients completed the same native fixture task through MCP: fill a field, enable an option, submit once, verify, and capture a window. Each used 11 tool calls with zero errors, preserved focus, displayed the right agent identity, and removed the overlays with `release`. The AI results are from v0.2.0. The v0.2.1 motion update adds nine native animation checks; live activity and UI checks also pass. [Results, methodology, and limitations](docs/BENCHMARKS.md).
 
 ## Build, test, contribute
 

@@ -38,11 +38,14 @@ Run these serially after building the fixture:
 npm run test:activity
 npm run test:ui
 npm run test:focus
+npm run test:motion
 ```
 
 - Activity: 16 assertions across two real helper sessions, correct Claude/Grok attribution, visible ghost cursor, hiding behind a covering window and returning, stacked non-overlapping pills, click-through/non-activating flags, raw-key rejection, semantic editing, and independent release.
 - UI: 12 assertions using the actual AppKit panel, comparing rendered dot frames, expanded content and window title, hover expansion/collapse, click-through behavior, non-key/main status, foreground isolation, and cleanup. Pointer positions are injected into the production hover calculation; the real mouse never moves. It captures only its own panels to PNG, not the desktop. This is a programmatic hover test, not a hardware-mouse walkthrough.
 - Focus guard: 7 assertions with a test-only button that deliberately activates the fixture. The helper returns `FOCUS_CHANGED`, retains the pause across observations, rejects further writes, and does not clear the block on `release`. This validates containment after a change, not prevention of every app-side activation.
+
+Nine deterministic native motion checks cover smooth interpolation, no overshoot, bounded idle drift, continuity when retargeting during idle, and stable animation under repeated target refresh. The UI test selects its own fixture PID and clears stale readiness state before launching.
 
 Ten JavaScript unit tests also cover explicit/inferred agent identity, release, and the restricted MCP action schema. See [activity behavior](ACTIVITY.md) for visuals and limitations.
 

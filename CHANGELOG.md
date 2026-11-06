@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.2.1 — 2026-11-06
+
+- Smooth ghost-cursor travel between targets with eased starts and stops.
+- Gentle idle floating, without moving the user’s real pointer or changing the actual action target.
+- 60 Hz visual updates, nine deterministic motion checks, and a fixture-startup race fix in the UI test.
+- Product-showcase videos in widescreen and vertical formats, assembled in Hyperframes from the actual native UI.
+
 ## 0.2.0 — 2026-11-06
 
 - Default top-right animated three-dot indicator; hover reveals AI/app icons, window title, and latest action. Multiple sessions stack independently.

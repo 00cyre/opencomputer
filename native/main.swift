@@ -117,7 +117,7 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.2.0", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.2.1", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]

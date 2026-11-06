@@ -28,4 +28,6 @@ jobs:
         env:
           OPENCOMPUTER_ARCH: ${{ matrix.arch }}
       - run: codesign --verify --strict build/opencomputer-native
+      - run: npm run test:motion
+        if: matrix.arch == 'arm64'
       - run: npm run fixture:build

@@ -18,7 +18,7 @@ Each helper represents one session and its latest target app. Concurrent session
 
 ![Ghost cursor](assets/ghost-cursor.png)
 
-The colored arrow marks the last targeted control, or a point near the window’s upper left during observation. It follows the target window and appears only where that window is exposed. Covering that point, minimizing/hiding the window, or moving it offscreen hides the arrow. It reappears when the target is visible again. Accessibility hit-testing checks only the owner/window identity of the point; it does not read covering apps’ contents.
+The colored arrow marks the last targeted control, or a point near the window’s upper left during observation. It eases between targets over 220–500 ms with zero starting/ending velocity. After a brief pause it gently floats by up to 2.4 points vertically and 0.65 points horizontally, with a 2.4-second vertical cycle. These are visual offsets; the real pointer stays untouched. It follows the target window and appears only where that window is exposed. Covering that point, minimizing/hiding the window, or moving it offscreen hides the arrow. It reappears when the target is visible again. Accessibility hit-testing checks only the owner/window identity of the point; it does not read covering apps’ contents.
 
 The arrow is a visual annotation. It does not move the real pointer and is not included in app-window screenshots returned to the agent.
 
