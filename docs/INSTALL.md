@@ -52,6 +52,10 @@ Trust the project through Grok's own flow before running it. Untrusted project s
 
 Configure a stdio command using the same executable, arguments, and environment. Protocol negotiation supports the MCP `2024-11-05` baseline. Tool output includes native image content blocks; select a vision-capable model for screenshot interpretation. No HTTP/SSE server is exposed.
 
+## Activity indicators
+
+The three-dot animation and ghost cursor are enabled by default. Hover the dots for agent → app, window/tab title, and current action. Identity comes from the MCP client name; optionally add `OPENCOMPUTER_AGENT` to the server environment to choose a display label. `OPENCOMPUTER_OVERLAY=0` disables both visuals while keeping focus protection. Reconnect after updating the runtime or settings. [Details and screenshots](ACTIVITY.md).
+
 ## Troubleshooting
 
 | Error | Action |
@@ -63,6 +67,9 @@ Configure a stdio command using the same executable, arguments, and environment.
 | `SCREEN_RECORDING_REQUIRED` | Approve capture permission or use accessibility-only tools. |
 | `STALE_SNAPSHOT` | Observe again. IDs are scoped to one process, app, and snapshot. |
 | `AX_ERROR` | Re-observe; the control may not support that action. Use the returned action list. |
+| `USER_BUSY` | The user recently typed/clicked in the foreground target. Wait, observe, and retry when idle. |
+| `FOCUS_UNSAFE` | Use semantic controls or `setValue`; raw key injection and focus-setting actions are disabled. |
+| `FOCUS_CHANGED` / `FOCUS_PROTECTION_BLOCKED` | Inspect the outcome; a dispatched action may have completed. Further writes are paused until reconnect. Focus is never restored automatically. |
 | `TIMEOUT` | Create/reconnect the server, then re-observe. The action may have partially executed. |
 | `selectionRequired` | Choose a returned window ID, then call `screenshot` again. |
 

@@ -28,3 +28,12 @@ test('screenshots become image blocks with separate metadata',async () => {
   assert.equal(result.result.content[0].type,'image');
   assert.equal(JSON.parse(result.result.content[1].text).data,undefined);
 });
+test('MCP identity reaches the native presentation and keyboard injection is absent', async () => {
+  const names=[];
+  const client={request:mock.request,setClientInfo:async name=>names.push(name)};
+  await handle(request('initialize',{clientInfo:{name:'claude-code',version:'test'}}),client);
+  assert.deepEqual(names,['claude-code']);
+  assert.ok(tools.some(t=>t.name==='release'));
+  assert.ok(!tools.some(t=>t.name==='pressKey'));
+  assert.deepEqual(tools.find(t=>t.name==='performAction').inputSchema.properties.action.enum,['AXPress','AXIncrement','AXDecrement','AXPick']);
+});

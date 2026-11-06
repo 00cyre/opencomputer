@@ -1,0 +1,51 @@
+{
+  "date": "2026-11-06",
+  "environment": {
+    "macOS": "27.2",
+    "architecture": "arm64",
+    "node": "25.9.0",
+    "swift": "6.1.2"
+  },
+  "scope": "One final identical fixture task per client; action-level background checks. Not a broad model ranking.",
+  "unitTestsPassed": 8,
+  "nativeAssertionsPassed": 13,
+  "results": [
+    {
+      "client": "claude",
+      "clientVersion": "2.1.316 (Claude Code)",
+      "models": [
+        "claude-opus-5-5"
+      ],
+      "elapsedSeconds": 33.23,
+      "toolCalls": 10,
+      "toolErrors": 0,
+      "tokenCorrect": true,
+      "optionCorrect": true,
+      "submittedExactlyOnce": true,
+      "foregroundPreserved": true,
+      "screenshotToolSucceeded": true,
+      "actionFocusPreserved": true,
+      "allActionsInBackground": true,
+      "passed": true
+    },
+    {
+      "client": "grok",
+      "clientVersion": "grok 1.0.62 (1474f9cbdd91) [stable]",
+      "models": [
+        "grok-4.7-build"
+      ],
+      "elapsedSeconds": 36.79,
+      "toolCalls": 10,
+      "toolErrors": 0,
+      "tokenCorrect": true,
+      "optionCorrect": true,
+      "submittedExactlyOnce": true,
+      "foregroundPreserved": true,
+      "screenshotToolSucceeded": true,
+      "actionFocusPreserved": true,
+      "allActionsInBackground": true,
+      "passed": true
+    }
+  ],
+  "version": "0.1.0"
+}

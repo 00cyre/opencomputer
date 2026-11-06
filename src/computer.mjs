@@ -8,11 +8,13 @@ export class ComputerError extends Error {
 
 /** One connection owns one native process and one current accessibility snapshot. */
 export class Computer {
-  #child; #queue = Promise.resolve(); #pending; #closed = false;
-  constructor({apps = [], executable = fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
+  #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent;
+  constructor({apps = [], agent, overlay = true, executable = fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
     if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(x))) throw new TypeError('apps must be exact bundle IDs');
+    if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
+    this.#explicitAgent = agent;
     this.timeoutMs = timeoutMs;
-    this.#child = spawn(executable, [], {env: {...process.env, OPENCOMPUTER_APPS: apps.join(',')}, stdio: ['pipe','pipe','pipe']});
+    this.#child = spawn(executable, [], {env: {...process.env, OPENCOMPUTER_APPS: apps.join(','), OPENCOMPUTER_AGENT: agent ?? "Agent", OPENCOMPUTER_OVERLAY: overlay ? "1" : "0"}, stdio: ['pipe','pipe','pipe']});
     // Native diagnostics go only to stderr; stdout is reserved for the protocol.
     this.#child.stderr.on('data', data => process.stderr.write(data));
     const lines = createInterface({input: this.#child.stdout});
@@ -53,6 +55,11 @@ export class Computer {
     this.#queue = result.catch(() => {});
     return result;
   }
+  setClientInfo(name) {
+    if (this.#explicitAgent !== undefined) return Promise.resolve();
+    return this.request("configure", {agent: String(name ?? "Agent").slice(0, 100)});
+  }
+  release() { return this.request("release"); }
   getState() { return this.request('apps'); }
   status() { return this.request('status'); }
   getApp(bundleId) { return new App(this, bundleId); }

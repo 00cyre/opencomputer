@@ -7,6 +7,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     let consent = NSButton(checkboxWithTitle: "Enable test option", target: nil, action: nil)
     let output = ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_OUTPUT"] ?? "/tmp/opencomputer-fixture.json"
     var submissions = 0
+    var cover: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:80,y:80,width:520,height:300), styleMask:[.titled,.closable,.miniaturizable], backing:.buffered, defer:false)
         window.title = "OpenComputer Test Fixture"
@@ -26,8 +27,38 @@ final class Delegate: NSObject, NSApplicationDelegate {
         status.frame = NSRect(x:28,y:32,width:460,height:35)
         status.setAccessibilityIdentifier("benchmark-status")
         for view in [title,field,consent,button,status] { window.contentView!.addSubview(view) }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_TOP_RIGHT"] == "1", let screen = NSScreen.screens.first {
+            window.setFrameOrigin(NSPoint(x:screen.visibleFrame.maxX-window.frame.width,y:screen.visibleFrame.maxY-window.frame.height))
+        }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_FOCUS_TRAP"] == "1" {
+            let trap = NSButton(title:"Focus trap",target:self,action:#selector(focusTrap))
+            trap.frame = NSRect(x:250,y:85,width:160,height:34)
+            trap.setAccessibilityIdentifier("focus-trap")
+            window.contentView!.addSubview(trap)
+        }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_OVERLAY_TEST"] == "1" {
+            let coverButton = NSButton(title:"Cover ghost",target:self,action:#selector(coverGhost))
+            coverButton.frame = NSRect(x:250,y:85,width:160,height:34)
+            coverButton.setAccessibilityIdentifier("cover-ghost")
+            window.contentView!.addSubview(coverButton)
+        }
         window.orderFrontRegardless()
         save()
+    }
+    @objc func coverGhost() {
+        let panel = NSPanel(contentRect:window.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
+        panel.backgroundColor = .windowBackgroundColor
+        panel.level = .floating
+        panel.isReleasedWhenClosed = false
+        panel.orderFrontRegardless(); cover = panel
+        DispatchQueue.main.asyncAfter(deadline:.now()+1) { panel.close(); self.cover = nil }
+    }
+    @objc func focusTrap() {
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.04) {
+            NSApp.activate(ignoringOtherApps:true)
+            self.window.makeKeyAndOrderFront(nil)
+            self.window.makeFirstResponder(self.field)
+        }
     }
     @objc func submit() {
         submissions += 1

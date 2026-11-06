@@ -2,24 +2,11 @@ import AppKit
 import ApplicationServices
 import ScreenCaptureKit
 
-struct Failure: Error { let code: String; let message: String }
-func fail(_ code: String, _ message: String) throws -> Never { throw Failure(code: code, message: message) }
-func string(_ request: [String: Any], _ key: String) throws -> String {
-    guard let value = request[key] as? String, !value.isEmpty else { try fail("INVALID_ARGUMENT", "\(key) must be a nonempty string") }
-    return value
-}
-func attribute(_ element: AXUIElement, _ name: String) -> CFTypeRef? {
-    var value: CFTypeRef?
-    guard AXUIElementCopyAttributeValue(element, name as CFString, &value) == .success else { return nil }
-    return value
-}
-func axCheck(_ result: AXError, _ operation: String) throws {
-    guard result == .success else { try fail("AX_ERROR", "\(operation) failed (AXError \(result.rawValue)). Observe again; the app may not support this action.") }
-}
-func frontmost() -> String { NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown" }
-
+@MainActor
 final class Computer {
     let allowed: Set<String>
+    let overlay = ActivityOverlay()
+    let focus = FocusGuard()
     var snapshotID = ""
     var snapshotPID: pid_t = 0
     var snapshotBundle = ""
@@ -113,6 +100,8 @@ final class Computer {
             }
             window = windows[0]
         }
+        overlay.track(app,title:window.title,captureWindowID:window.windowID,captureFrame:window.frame,action:"Capturing window")
+        if focus.blocked { overlay.markBlocked() }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
         let scale = min(1, 1600 / max(window.frame.width, window.frame.height))
@@ -128,7 +117,13 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.1.0"]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.2.0", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
+        case "configure":
+            overlay.configure(try string(request,"agent"))
+            return ["agent":overlay.view.agent.name]
+        case "release":
+            overlay.release(); snapshotID = ""; elements = []
+            return ["released":true]
         case "apps":
             let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
                 ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "allowed": allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
@@ -136,13 +131,28 @@ final class Computer {
             return ["apps": apps.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }]
         default: break
         }
-        guard ["observe", "screenshot", "click", "setValue", "performAction", "pressKey", "typeText", "scroll", "drag"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
+        guard ["observe", "screenshot", "click", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
         let app = try target(request)
         if method == "screenshot" { return try await screenshot(app, request) }
         try trusted()
-        if method == "observe" { return observe(app) }
+        if method == "observe" {
+            let result = observe(app)
+            overlay.track(app,action:"Reading window")
+            if focus.blocked { overlay.markBlocked() }
+            return result
+        }
         let item = try element(request, app)
-        let before = frontmost()
+        guard !focus.userIsEditing(app) else { try fail("USER_BUSY", "The user is typing or clicking in this app. Wait and observe again before acting.") }
+        if method == "pressKey" { try fail("FOCUS_UNSAFE", "Raw keyboard injection is disabled to protect user focus. Use semantic accessibility controls or setValue instead.") }
+        if method == "performAction", let action = request["action"] as? String, [kAXShowMenuAction,kAXConfirmAction,kAXCancelAction].contains(action) {
+            try fail("FOCUS_UNSAFE", "This action can move focus. Use a specific semantic control instead.")
+        }
+        let before = try focus.begin()
+        let label = cleanLabel((attribute(item,kAXTitleAttribute) as? String) ?? (attribute(item,kAXDescriptionAttribute) as? String) ?? "control",limit:45)
+        let verbs = ["click":"Clicking", "setValue":"Editing", "typeText":"Editing", "scroll":"Scrolling", "performAction":"Using"]
+        overlay.track(app,element:item,action:"\(verbs[method] ?? "Using") \(label)")
+        var dispatchError: Error?
+        do {
         // Consume before dispatch: even a partially failed action must be re-observed.
         snapshotID = ""
         switch method {
@@ -152,72 +162,60 @@ final class Computer {
             try axCheck(AXUIElementSetAttributeValue(item, kAXValueAttribute as CFString, value as CFString), "AXValue")
         case "performAction":
             let action = try string(request, "action")
-            let supported = [kAXPressAction, kAXConfirmAction, kAXCancelAction, kAXIncrementAction, kAXDecrementAction, kAXShowMenuAction, kAXPickAction]
+            let supported = [kAXPressAction, kAXIncrementAction, kAXDecrementAction, kAXPickAction]
             guard supported.contains(action) else { try fail("INVALID_ARGUMENT", "Use a supported action listed in the snapshot") }
             try axCheck(AXUIElementPerformAction(item, action as CFString), action)
-        case "pressKey", "typeText":
-            try axCheck(AXUIElementSetAttributeValue(item, kAXFocusedAttribute as CFString, kCFBooleanTrue), "AXFocused")
-            if method == "typeText" {
-                let text = try string(request, "text")
-                guard text.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "text is too long") }
-                // Target the process; never post to the session-wide event tap or clipboard.
-                for chunk in text.utf16.map({ $0 }).chunked(20) {
-                    guard let down = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: true), let up = CGEvent(keyboardEventSource: nil, virtualKey: 0, keyDown: false) else { try fail("EVENT_FAILED", "Could not create keyboard event") }
-                    down.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
-                    up.keyboardSetUnicodeString(stringLength: chunk.count, unicodeString: chunk)
-                    down.postToPid(app.processIdentifier); up.postToPid(app.processIdentifier)
-                }
-            } else {
-                let key = try string(request, "key")
-                let codes: [String: CGKeyCode] = ["Return":36,"Tab":48,"Escape":53,"Backspace":51,"Delete":117,"Space":49,"Left":123,"Right":124,"Down":125,"Up":126,"Home":115,"End":119,"PageUp":116,"PageDown":121,"a":0,"c":8,"v":9,"x":7,"z":6]
-                let parts = key.split(separator: "+").map(String.init)
-                guard let last = parts.last, let code = codes[last] else { try fail("INVALID_ARGUMENT", "Unsupported key. See docs/API.md") }
-                var flags: CGEventFlags = []
-                for modifier in parts.dropLast() {
-                    switch modifier.lowercased() {
-                    case "super", "cmd", "meta": flags.insert(.maskCommand)
-                    case "ctrl", "control": flags.insert(.maskControl)
-                    case "shift": flags.insert(.maskShift)
-                    case "alt", "option": flags.insert(.maskAlternate)
-                    default: try fail("INVALID_ARGUMENT", "Unknown key modifier")
-                    }
-                }
-                for down in [true, false] {
-                    guard let event = CGEvent(keyboardEventSource: nil, virtualKey: code, keyDown: down) else { try fail("EVENT_FAILED", "Could not create key event") }
-                    event.flags = flags; event.postToPid(app.processIdentifier)
-                }
-            }
+        case "typeText":
+            let text = try string(request,"text")
+            guard text.utf16.count <= 16000,
+                  let selected = attribute(item,kAXSelectedTextRangeAttribute), CFGetTypeID(selected) == AXValueGetTypeID(),
+                  let current = attribute(item,kAXValueAttribute) as? String else { try fail("FOCUS_UNSAFE", "This control does not expose safe text replacement. Use setValue.") }
+            var range = CFRange()
+            guard AXValueGetValue(unsafeBitCast(selected,to:AXValue.self),.cfRange,&range), range.location >= 0, range.length >= 0,
+                  range.location <= (current as NSString).length, range.length <= (current as NSString).length-range.location else { try fail("INVALID_SELECTION", "Observe the text control again") }
+            let replacement = (current as NSString).replacingCharacters(in:NSRange(location:range.location,length:range.length),with:text)
+            guard replacement.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "Result exceeds 16000 UTF-16 units") }
+            try axCheck(AXUIElementSetAttributeValue(item,kAXValueAttribute as CFString,replacement as CFString),"AXValue")
         case "scroll":
             let direction = try string(request, "direction")
             let actions = ["up": "AXScrollUpByPage", "down": "AXScrollDownByPage", "left": "AXScrollLeftByPage", "right": "AXScrollRightByPage"]
             guard let action = actions[direction] else { try fail("INVALID_ARGUMENT", "direction must be up/down/left/right") }
             try axCheck(AXUIElementPerformAction(item, action as CFString), action)
-        case "drag":
-            try fail("UNSUPPORTED", "Background coordinate dragging is not supported in 0.1. Use semantic controls or a dedicated app integration.")
         default: try fail("UNKNOWN_METHOD", method)
         }
-        try await Task.sleep(nanoseconds: 100_000_000)
-        let after = frontmost()
-        return ["dispatched": true, "method": method, "frontmostBefore": before, "frontmostAfter": after, "focusChanged": before != after, "verificationRequired": true]
+        } catch { dispatchError = error }
+        try? await Task.sleep(nanoseconds: 150_000_000)
+        let (after,changed) = focus.finish()
+        if changed {
+            overlay.markBlocked()
+            try fail("FOCUS_CHANGED", "Focus changed during dispatch; the action may have executed. Further actions in this session are blocked. The user's focus was not restored or overridden.")
+        }
+        if let error = dispatchError { throw error }
+        return ["dispatched":true,"method":method,"frontmostBefore":before.bundle,"frontmostAfter":after.bundle,"focusChanged":false,"verificationRequired":true,"activity":overlay.state()]
     }
 }
-extension Array {
-    func chunked(_ size: Int) -> [[Element]] { stride(from: 0, to: count, by: size).map { Array(self[$0..<Swift.min($0 + size, count)]) } }
-}
-
 let application = NSApplication.shared
-application.setActivationPolicy(.prohibited)
-let computer = Computer()
+application.setActivationPolicy(.accessory)
+let computer = MainActor.assumeIsolated { Computer() }
 func write(_ value: [String: Any]) {
-    if let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]), let text = String(data: data, encoding: .utf8) { print(text); fflush(stdout) }
+    if let data = try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]), let text = String(data:data,encoding:.utf8) { print(text); fflush(stdout) }
 }
-// A serial line protocol keeps snapshot ownership deterministic.
-while let line = readLine() {
-    guard line.utf8.count <= 1_048_576 else { write(["error": ["code": "TOO_LARGE", "message": "Request exceeds 1 MiB"]]); continue }
-    do {
-        guard let data = line.data(using: .utf8), let request = try JSONSerialization.jsonObject(with: data) as? [String: Any] else { try fail("INVALID_JSON", "Expected a JSON object") }
-        let result = try await computer.handle(request)
-        write(["result": result])
-    } catch let error as Failure { write(["error": ["code": error.code, "message": error.message]]) }
-    catch { write(["error": ["code": "NATIVE_ERROR", "message": error.localizedDescription]]) }
+// Read input off the main thread; keep the AppKit event loop alive between tool calls.
+// The semaphore serializes dispatch so a connection still owns exactly one snapshot.
+DispatchQueue.global(qos:.userInitiated).async {
+    while let line = readLine() {
+        let completed = DispatchSemaphore(value:0)
+        Task { @MainActor in
+            defer { completed.signal() }
+            do {
+                guard line.utf8.count <= 1_048_576 else { try fail("TOO_LARGE","Request exceeds 1 MiB") }
+                guard let data = line.data(using:.utf8), let request = try JSONSerialization.jsonObject(with:data) as? [String:Any] else { try fail("INVALID_JSON","Expected a JSON object") }
+                write(["result":try await computer.handle(request)])
+            } catch let error as Failure { write(["error":["code":error.code,"message":error.message]]) }
+            catch { write(["error":["code":"NATIVE_ERROR","message":error.localizedDescription]]) }
+        }
+        completed.wait()
+    }
+    DispatchQueue.main.async { computer.overlay.shutdown(); application.terminate(nil) }
 }
+application.run()

@@ -6,6 +6,8 @@ App discovery returns running regular app names, bundle IDs, and PIDs. Observati
 
 Your AI client may transmit this output to its provider. Review that client's policies and allow only apps needed for the task. OpenComputer never reads AI credentials. The optional benchmark runner reuses the installed AI clients' login flows and stores their results locally; those clients perform authentication and inference.
 
-The runtime does not persist screenshots or accessibility trees. The benchmark audit proxy records tool names, elapsed times, and success/error status only. Benchmark transcripts and client configuration can contain private data and remain in ignored `work/` directories. Only manually reviewed aggregate results and the synthetic test fixture image are included in the repository.
+The activity panel displays the allowed app’s name/window title and latest action locally. Icons are loaded from installed apps. Hover reads pointer position without recording input. Ghost visibility and focus protection inspect foreground/window identity without reading unrelated app contents.
+
+The runtime does not persist screenshots or accessibility trees. For indicator stacking, it writes only PID, heartbeat timestamp, and expanded/collapsed state into a per-user temporary directory; no app titles, action text, or field values enter these records. The benchmark audit proxy records tool names, elapsed times, and success/error status only. Benchmark transcripts and client configuration can contain private data and remain in ignored `work/` directories. Only manually reviewed aggregate results and the synthetic test fixture image are included in the repository.
 
 Stopping the server ends access. Remove its client configuration and revoke macOS permissions to disable future use. There is no background service or login item.

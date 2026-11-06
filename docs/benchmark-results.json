@@ -1,4 +1,5 @@
 {
+  "version": "0.2.0",
   "date": "2026-11-06",
   "environment": {
     "macOS": "27.2",
@@ -6,9 +7,12 @@
     "node": "25.9.0",
     "swift": "6.1.2"
   },
-  "scope": "One final identical fixture task per client; action-level background checks. Not a broad model ranking.",
-  "unitTestsPassed": 8,
+  "scope": "One identical fixture task per installed client using the production MCP/native runtime; includes activity identity and release. Not a broad model ranking.",
+  "unitTestsPassed": 10,
   "nativeAssertionsPassed": 13,
+  "activityAssertionsPassed": 16,
+  "uiAssertionsPassed": 12,
+  "focusGuardAssertionsPassed": 7,
   "results": [
     {
       "client": "claude",
@@ -16,8 +20,8 @@
       "models": [
         "claude-opus-5-5"
       ],
-      "elapsedSeconds": 33.23,
-      "toolCalls": 10,
+      "elapsedSeconds": 33.93,
+      "toolCalls": 11,
       "toolErrors": 0,
       "tokenCorrect": true,
       "optionCorrect": true,
@@ -26,6 +30,8 @@
       "screenshotToolSucceeded": true,
       "actionFocusPreserved": true,
       "allActionsInBackground": true,
+      "activityAttributed": true,
+      "activityReleased": true,
       "passed": true
     },
     {
@@ -34,8 +40,8 @@
       "models": [
         "grok-4.7-build"
       ],
-      "elapsedSeconds": 36.79,
-      "toolCalls": 10,
+      "elapsedSeconds": 42.26,
+      "toolCalls": 11,
       "toolErrors": 0,
       "tokenCorrect": true,
       "optionCorrect": true,
@@ -44,6 +50,8 @@
       "screenshotToolSucceeded": true,
       "actionFocusPreserved": true,
       "allActionsInBackground": true,
+      "activityAttributed": true,
+      "activityReleased": true,
       "passed": true
     }
   ]

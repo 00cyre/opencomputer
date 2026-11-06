@@ -1,11 +1,21 @@
 {
   "name": "@00cyre/opencomputer",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "App-scoped background computer use for macOS. JavaScript API and local MCP server.",
   "type": "module",
   "exports": "./src/computer.mjs",
-  "bin": {"opencomputer": "./bin/opencomputer.mjs"},
-  "files": ["bin", "src", "native", "scripts/build.sh", "docs", "README.md", "LICENSE"],
+  "bin": {
+    "opencomputer": "./bin/opencomputer.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "native",
+    "scripts/build.sh",
+    "docs",
+    "README.md",
+    "LICENSE"
+  ],
   "scripts": {
     "build": "bash scripts/build.sh",
     "test": "node --test tests/*.test.mjs",
@@ -13,9 +23,17 @@
     "doctor": "node bin/opencomputer.mjs doctor",
     "fixture:build": "bash scripts/build-fixture.sh",
     "test:integration": "node tests/integration.mjs",
-    "package": "bash scripts/package.sh"
+    "package": "bash scripts/package.sh",
+    "test:activity": "node tests/activity.mjs",
+    "test:focus": "node tests/focus-guard.mjs",
+    "test:ui": "bash scripts/test-ui.sh"
   },
-  "engines": {"node": ">=22"},
+  "engines": {
+    "node": ">=22"
+  },
   "license": "MIT",
-  "repository": {"type":"git", "url":"https://github.com/00cyre/opencomputer.git"}
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/00cyre/opencomputer.git"
+  }
 }

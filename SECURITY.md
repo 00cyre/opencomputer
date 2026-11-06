@@ -14,7 +14,11 @@ OpenComputer is a local automation capability. An authorized agent can click con
 
 The allowlist is not a sandbox against the calling process. A host with arbitrary shell access can start another helper with a different allowlist or automate macOS independently. Use your agent's tool permissions to restrict it. Local binary/config integrity and macOS permissions remain trust boundaries.
 
-Process-targeted keyboard input is experimental, and applications can activate themselves in response to semantic actions. `focusChanged` is sampled before/after dispatch, not continuous proof of isolation. Unsupported controls are errors. A successful event dispatch is never a guarantee that a task completed.
+Raw keyboard injection, accessibility focus setters, and menu-show/confirm/cancel actions are disabled. Text is replaced through semantic values/selected ranges. Recent user input in the foreground target blocks dispatch. Annotation windows cannot become key/main, ignore mouse events, and never reposition the user’s pointer.
+
+Applications can still activate themselves in response to semantic actions. The guard watches app activation and focused window/control notifications during dispatch, compares focus before/after, and waits 150 ms before finishing. A detected change blocks further writes for that connection. It never restores focus, since the change may have been the user’s choice. App notifications can be absent and activation can be delayed; this is not continuous proof of isolation or a guarantee against the first focus change. A successful dispatch is never proof that a task completed.
+
+Agent labels and installed icons are display metadata, not verified identities. Session-stacking records contain only PID, timestamp, and expansion state in a per-user temporary directory. The visuals are not a security boundary; hosts can disable them.
 
 ## Reporting
 

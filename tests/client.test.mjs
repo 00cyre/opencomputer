@@ -37,3 +37,11 @@ test('missing helper reports build instruction',async()=>{
   const c=new Computer({executable:join(dir,'missing')});
   await assert.rejects(c.status(),{code:'HELPER_UNAVAILABLE'});
 });
+test('explicit agent attribution overrides inferred client names and release reaches native host',async()=>{
+  const c=new Computer({executable,agent:'Claude'});
+  try {assert.equal(await c.setClientInfo('different-client'),undefined);assert.equal((await c.release()).method,'release');}
+  finally {c.close();}
+  const inferred=new Computer({executable});
+  try {assert.equal((await inferred.setClientInfo('grok-build')).agent,'grok-build');}
+  finally {inferred.close();}
+});
