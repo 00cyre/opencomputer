@@ -1,0 +1,13 @@
+build/
+dist/
+work/
+node_modules/
+.DS_Store
+.env
+.env.*
+*.log
+.grok/
+.claude/
+.mcp.json
+core
+*.core
