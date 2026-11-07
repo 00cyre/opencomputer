@@ -4,6 +4,7 @@ import {resolve,join} from 'node:path';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
 import {createComputer} from '../src/computer.mjs';
+import {summarizeAudit} from './benchmark-audit.mjs';
 const root=fileURLToPath(new URL('../',import.meta.url));
 const label=process.argv[2];
 if(!['claude','grok'].includes(label))throw Error('Usage: node scripts/benchmark.mjs claude|grok OUTPUT_DIR');
@@ -12,7 +13,7 @@ await mkdir(dir,{recursive:true});
 const statePath=join(dir,'fixture.json'),auditPath=join(dir,'audit.jsonl');
 await writeFile(auditPath,'');
 await rm(statePath,{force:true});
-const fixture=spawn(join(root,'build/OpenComputer Fixture.app/Contents/MacOS/fixture'),[],{env:{...process.env,OPENCOMPUTER_FIXTURE_OUTPUT:statePath},stdio:'ignore'});
+const fixture=spawn(join(root,'build/OpenComputer Fixture.app/Contents/MacOS/fixture'),[],{env:{...process.env,OPENCOMPUTER_FIXTURE_OUTPUT:statePath,OPENCOMPUTER_FIXTURE_AWAY_FROM_POINTER:'1'},stdio:'ignore'});
 const computer=createComputer({apps:['cc.opencomputer.fixture']});
 const token='OPENCOMPUTER-BENCH-2026';
 const prompt=`Use only the opencomputer MCP tools to complete this benchmark. The only permitted app is cc.opencomputer.fixture. Do not use shell, files, other computer tools, or subagents. 1. Check status and observe the app. 2. Set the Benchmark token field to exactly ${token}. 3. Turn on Enable test option. 4. Click Submit benchmark exactly once. 5. Observe again and verify the result. 6. Capture the fixture window screenshot; if offered multiple windows, select OpenComputer Test Fixture. 7. Call release when finished to remove the activity indicators. Report whether the token and option are correct and whether focusChanged was ever true. Observe before and after each action; use each fresh snapshot. This is a disposable test app with no user data.`;
@@ -36,7 +37,7 @@ try{
     agentEnv.GROK_HOME=grokHome;
     const setup=spawnSync('grok',['mcp','add','--scope','user','opencomputer','-e','OPENCOMPUTER_APPS=cc.opencomputer.fixture','-e',`OPENCOMPUTER_BENCH_AUDIT=${auditPath}`,'--',process.execPath,join(root,'tests/mcp-audit.mjs')],{cwd:dir,env:agentEnv,encoding:'utf8'});
     if(setup.status!==0)throw Error(setup.stderr||setup.stdout);
-    args=['--leader-socket',join(dir,'leader.sock'),'--cwd',dir,'-p',prompt,'--tools','','--disable-web-search','--no-subagents','--max-turns','24','--allow','opencomputer__*','--permission-mode','dontAsk','--output-format','json'];
+    args=['--leader-socket',join(dir,'leader.sock'),'--cwd',dir,'-p',prompt,'--tools','','--disable-web-search','--no-subagents','--max-turns','64','--allow','opencomputer__*','--permission-mode','dontAsk','--output-format','json'];
   }
   const started=performance.now();
   console.log(`Starting ${label} benchmark with fixture-only MCP access`);
@@ -53,7 +54,12 @@ try{
   const result={client:label,clientVersion:spawnSync(label,['--version'],{encoding:'utf8'}).stdout.trim(),exitCode:code,elapsedSeconds:Number(((performance.now()-started)/1000).toFixed(2)),toolCalls:audit.length,toolErrors:audit.filter(x=>!x.ok).length,tokenCorrect:actual.token===token,optionCorrect:actual.option===true,submittedExactlyOnce:actual.submissions===1,foregroundPreserved:!audit.some(x=>x.focusChanged||x.targetWasForeground)&&actual.frontmostApp!=='cc.opencomputer.fixture',foregroundStableAcrossRun:actual.frontmostApp===before.frontmostApp&&after.frontmostApp===before.frontmostApp,screenshotToolSucceeded:audit.some(x=>x.tool==='screenshot'&&x.ok&&x.imageCaptured),actionFocusPreserved:!audit.some(x=>x.focusChanged),allActionsInBackground:!audit.some(x=>x.targetWasForeground),activityAttributed:audit.filter(x=>['click','setValue','typeText','performAction','scroll'].includes(x.tool)).every(x=>x.activityAgent?.toLowerCase()===label&&x.pillVisible&&x.nonActivating&&x.clickThrough),activityReleased:audit.some(x=>x.tool==='release'&&x.ok&&x.released),fixture:actual};
   try{const parsed=JSON.parse(stdout);result.models=Object.keys(parsed.modelUsage??{});}catch{result.models=[];}
   result.foregroundSamples={before:before.frontmostApp,atSubmit:actual.frontmostApp,after:after.frontmostApp};
-  result.passed=result.toolErrors===0&&result.activityAttributed&&result.activityReleased&&result.actionFocusPreserved&&result.exitCode===0&&result.tokenCorrect&&result.optionCorrect&&result.submittedExactlyOnce&&result.foregroundPreserved&&result.screenshotToolSucceeded;
+  const summary=summarizeAudit(audit);
+  result.protectivePauses=summary.protectivePauses;
+  result.unexpectedToolErrors=summary.unexpectedToolErrors;
+  result.reobservedAfterPause=summary.reobservedAfterPause;
+  result.activityAttributed=summary.activityAttributed&&summary.dispatched.every(x=>x.activityAgent?.toLowerCase()===label);
+  result.passed=result.unexpectedToolErrors===0&&result.reobservedAfterPause&&result.activityAttributed&&result.activityReleased&&result.actionFocusPreserved&&result.exitCode===0&&result.tokenCorrect&&result.optionCorrect&&result.submittedExactlyOnce&&result.foregroundPreserved&&result.screenshotToolSucceeded;
   await writeFile(join(dir,'result.json'),JSON.stringify(result,null,2)+'\n');
   console.log(JSON.stringify(result,null,2));
   if(!result.passed)process.exitCode=1;

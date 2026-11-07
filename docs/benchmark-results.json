@@ -1,18 +1,20 @@
 {
-  "version": "0.2.0",
-  "date": "2026-11-06",
+  "version": "0.3.0",
+  "date": "2026-11-07",
   "environment": {
     "macOS": "27.2",
     "architecture": "arm64",
     "node": "25.9.0",
     "swift": "6.1.2"
   },
-  "scope": "One identical fixture task per installed client using the production MCP/native runtime; includes activity identity and release. Not a broad model ranking.",
-  "unitTestsPassed": 10,
+  "scope": "Disposable fixture task through production MCP/native runtime; includes interaction checks, activity identity, and release. Not a model ranking. Earlier interrupted runs are disclosed below.",
+  "unitTestsPassed": 13,
   "nativeAssertionsPassed": 13,
   "activityAssertionsPassed": 16,
   "uiAssertionsPassed": 12,
-  "focusGuardAssertionsPassed": 7,
+  "focusAndInteractionAssertionsPassed": 28,
+  "interactionPolicyScenariosPassed": 21,
+  "motionChecksPassed": 9,
   "results": [
     {
       "client": "claude",
@@ -20,7 +22,7 @@
       "models": [
         "claude-opus-5-5"
       ],
-      "elapsedSeconds": 33.93,
+      "elapsedSeconds": 30.25,
       "toolCalls": 11,
       "toolErrors": 0,
       "tokenCorrect": true,
@@ -40,8 +42,8 @@
       "models": [
         "grok-4.7-build"
       ],
-      "elapsedSeconds": 42.26,
-      "toolCalls": 11,
+      "elapsedSeconds": 49.98,
+      "toolCalls": 14,
       "toolErrors": 0,
       "tokenCorrect": true,
       "optionCorrect": true,
@@ -52,7 +54,30 @@
       "allActionsInBackground": true,
       "activityAttributed": true,
       "activityReleased": true,
-      "passed": true
+      "passed": true,
+      "protectivePauses": 0,
+      "unexpectedToolErrors": 0,
+      "reobservedAfterPause": true
+    }
+  ],
+  "earlierGrokAttempts": [
+    {
+      "elapsedSeconds": 48.43,
+      "toolCalls": 17,
+      "toolErrors": 1,
+      "taskCompleted": true,
+      "originalHarnessPassed": false,
+      "note": "Recovered from a held-mouse USER_BUSY and completed the task; the old harness required zero tool errors and checked display metadata on rejected writes."
+    },
+    {
+      "elapsedSeconds": 151.71,
+      "toolCalls": 28,
+      "toolErrors": 3,
+      "protectivePauses": 3,
+      "unexpectedToolErrors": 0,
+      "taskCompleted": false,
+      "passed": false,
+      "note": "Stopped at the original 24-turn limit while respecting activity conflicts. Final run uses 64 turns and places only its disposable fixture away from the pointer; protection remains enabled."
     }
   ]
 }

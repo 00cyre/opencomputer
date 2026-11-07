@@ -39,15 +39,19 @@ npm run test:activity
 npm run test:ui
 npm run test:focus
 npm run test:motion
+npm run test:interaction
 ```
 
 - Activity: 16 assertions across two real helper sessions, correct Claude/Grok attribution, visible ghost cursor, hiding behind a covering window and returning, stacked non-overlapping pills, click-through/non-activating flags, raw-key rejection, semantic editing, and independent release.
 - UI: 12 assertions using the actual AppKit panel, comparing rendered dot frames, expanded content and window title, hover expansion/collapse, click-through behavior, non-key/main status, foreground isolation, and cleanup. Pointer positions are injected into the production hover calculation; the real mouse never moves. It captures only its own panels to PNG, not the desktop. This is a programmatic hover test, not a hardware-mouse walkthrough.
-- Focus guard: 7 assertions with a test-only button that deliberately activates the fixture. The helper returns `FOCUS_CHANGED`, retains the pause across observations, rejects further writes, and does not clear the block on `release`. This validates containment after a change, not prevention of every app-side activation.
+- Focus and interaction: a test-only button deliberately activates the fixture. The helper returns `FOCUS_CHANGED`, retains the pause across observations, rejects further writes, and does not clear the block on `release`. A fresh connection then rejects editing the focused field with `USER_BUSY`, returns no-dispatch/retry metadata, and displays the waiting pill. It can edit another window of the same app while preserving the foreground editor. This also exercises explicit all-app access, window selection, subtree expansion, and preflight checks through the production helper. This validates containment after a change, not prevention of every app-side activation.
+- Interaction policy: 21 deterministic scenarios covering held mouse gestures and keys, focused editors, pointer proximity, recent typing/clicking/scrolling/movement, missing state, unrelated windows, quiet-time boundaries, and resumption after a gesture ends. These simulate signals without injecting global input.
 
 Nine deterministic native motion checks cover smooth interpolation, no overshoot, bounded idle drift, continuity when retargeting during idle, and stable animation under repeated target refresh. The UI test selects its own fixture PID and clears stale readiness state before launching.
 
-Ten JavaScript unit tests also cover explicit/inferred agent identity, release, and the restricted MCP action schema. See [activity behavior](ACTIVITY.md) for visuals and limitations.
+Thirteen JavaScript unit tests also cover explicit/inferred agent identity, release, interaction metadata, protective-pause audit classification, preflight snapshot preservation, scoped observation arguments, and the restricted MCP action schema. See [activity behavior](ACTIVITY.md) for visuals and limitations.
+
+The 0.3.0 live runs on 2026-11-07 passed integration, focus/interaction, activity, and UI checks, plus motion and interaction-policy scenarios. An earlier integration run returned `USER_BUSY` for real pointer movement in the fixture before dispatch; a fresh serial run passed. Keep working in other windows while tests run; a conflict is an intentional pause, not permission to disable the guard. A test interrupted by human activity must start fresh, not replay stale references.
 
 ## AI-client benchmark
 

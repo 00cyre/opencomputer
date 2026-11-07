@@ -7,6 +7,7 @@ final class Computer {
     let allowed: Set<String>
     let overlay = ActivityOverlay()
     let focus = FocusGuard()
+    let interaction = InteractionGuard()
     var snapshotID = ""
     var snapshotPID: pid_t = 0
     var snapshotBundle = ""
@@ -17,7 +18,7 @@ final class Computer {
     }
     func target(_ request: [String: Any]) throws -> NSRunningApplication {
         let bundle = try string(request, "app")
-        guard allowed.contains(bundle) else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
+        guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
         guard apps.count == 1, let app = apps.first else { try fail("APP_NOT_RUNNING", "Open exactly one instance of \(bundle), then try again.") }
         return app
@@ -37,9 +38,19 @@ final class Computer {
         }
         return item
     }
-    func observe(_ app: NSRunningApplication) -> [String: Any] {
-        let root = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(root, 2)
+    func observe(_ app: NSRunningApplication, _ request: [String:Any]) throws -> [String: Any] {
+        let applicationRoot = AXUIElementCreateApplication(app.processIdentifier)
+        AXUIElementSetMessagingTimeout(applicationRoot, 2)
+        let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
+        var root = applicationRoot
+        if request["root"] != nil {
+            guard request["window"] == nil, let index = request["root"] as? Int else { try fail("INVALID_ARGUMENT","Use either window or root, not both.") }
+            var reference = request; reference["element"] = index
+            root = try element(reference,app)
+        } else if let index = request["window"] as? Int {
+            guard windows.indices.contains(index) else { try fail("INVALID_WINDOW","Choose a window index returned by observe. Window indices may change; verify the returned title.") }
+            root = windows[index]
+        }
         elements = []
         snapshotID = UUID().uuidString
         snapshotPID = app.processIdentifier
@@ -83,7 +94,10 @@ final class Computer {
             }
         }
         walk(root, 0, nil)
-        return ["app": snapshotBundle, "pid": snapshotPID, "snapshot": snapshotID, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost()]
+        var result: [String:Any] = ["app": snapshotBundle, "pid": snapshotPID, "snapshot": snapshotID, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
+            "windows":windows.enumerated().map { index, window in ["index":index,"title":attribute(window,kAXTitleAttribute) as? String ?? "","minimized":attribute(window,kAXMinimizedAttribute) as? Bool ?? false] as [String:Any] }]
+        if let index = request["window"] as? Int { result["selectedWindow"] = index }
+        return result
     }
     func screenshot(_ app: NSRunningApplication, _ request: [String: Any]) async throws -> [String: Any] {
         guard CGPreflightScreenCaptureAccess() else { try fail("SCREEN_RECORDING_REQUIRED", "Allow Screen Recording for the launching host in System Settings, then restart it.") }
@@ -117,7 +131,7 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.2.1", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.3.0", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
@@ -126,31 +140,40 @@ final class Computer {
             return ["released":true]
         case "apps":
             let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
-                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "allowed": allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
+                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "allowed": allowed.contains("*") || allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
             }
             return ["apps": apps.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }]
         default: break
         }
-        guard ["observe", "screenshot", "click", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
+        guard ["observe", "screenshot", "checkInteraction", "click", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
         let app = try target(request)
         if method == "screenshot" { return try await screenshot(app, request) }
         try trusted()
         if method == "observe" {
-            let result = observe(app)
-            overlay.track(app,action:"Reading window")
+            let result = try observe(app,request)
+            overlay.track(app,element:elements.first,action:"Reading window")
             if focus.blocked { overlay.markBlocked() }
             return result
         }
         let item = try element(request, app)
-        guard !focus.userIsEditing(app) else { try fail("USER_BUSY", "The user is typing or clicking in this app. Wait and observe again before acting.") }
+        try focus.requireAvailable()
+        if method == "checkInteraction" { return interaction.assess(app,element:item).json }
         if method == "pressKey" { try fail("FOCUS_UNSAFE", "Raw keyboard injection is disabled to protect user focus. Use semantic accessibility controls or setValue instead.") }
         if method == "performAction", let action = request["action"] as? String, [kAXShowMenuAction,kAXConfirmAction,kAXCancelAction].contains(action) {
             try fail("FOCUS_UNSAFE", "This action can move focus. Use a specific semantic control instead.")
         }
-        let before = try focus.begin()
         let label = cleanLabel((attribute(item,kAXTitleAttribute) as? String) ?? (attribute(item,kAXDescriptionAttribute) as? String) ?? "control",limit:45)
         let verbs = ["click":"Clicking", "setValue":"Editing", "typeText":"Editing", "scroll":"Scrolling", "performAction":"Using"]
         overlay.track(app,element:item,action:"\(verbs[method] ?? "Using") \(label)")
+        let before = try focus.begin()
+        let decision = interaction.assess(app,element:item,foreground:before)
+        if !decision.canProceed {
+            focus.cancel()
+            overlay.markWaiting(decision.message)
+            var details = decision.json
+            details["dispatched"] = false
+            throw Failure(code:"USER_BUSY",message:decision.message + " Re-observe and check again before retrying; this action was not queued.",details:details)
+        }
         var dispatchError: Error?
         do {
         // Consume before dispatch: even a partially failed action must be re-observed.
@@ -211,7 +234,11 @@ DispatchQueue.global(qos:.userInitiated).async {
                 guard line.utf8.count <= 1_048_576 else { try fail("TOO_LARGE","Request exceeds 1 MiB") }
                 guard let data = line.data(using:.utf8), let request = try JSONSerialization.jsonObject(with:data) as? [String:Any] else { try fail("INVALID_JSON","Expected a JSON object") }
                 write(["result":try await computer.handle(request)])
-            } catch let error as Failure { write(["error":["code":error.code,"message":error.message]]) }
+            } catch let error as Failure {
+                var value: [String:Any] = ["code":error.code,"message":error.message]
+                if let details = error.details { value["details"] = details }
+                write(["error":value])
+            }
             catch { write(["error":["code":"NATIVE_ERROR","message":error.localizedDescription]]) }
         }
         completed.wait()

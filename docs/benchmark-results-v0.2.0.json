@@ -1,0 +1,58 @@
+{
+  "version": "0.2.0",
+  "date": "2026-11-06",
+  "environment": {
+    "macOS": "27.2",
+    "architecture": "arm64",
+    "node": "25.9.0",
+    "swift": "6.1.2"
+  },
+  "scope": "One identical fixture task per installed client using the production MCP/native runtime; includes activity identity and release. Not a broad model ranking.",
+  "unitTestsPassed": 10,
+  "nativeAssertionsPassed": 13,
+  "activityAssertionsPassed": 16,
+  "uiAssertionsPassed": 12,
+  "focusGuardAssertionsPassed": 7,
+  "results": [
+    {
+      "client": "claude",
+      "clientVersion": "2.1.316 (Claude Code)",
+      "models": [
+        "claude-opus-5-5"
+      ],
+      "elapsedSeconds": 33.93,
+      "toolCalls": 11,
+      "toolErrors": 0,
+      "tokenCorrect": true,
+      "optionCorrect": true,
+      "submittedExactlyOnce": true,
+      "foregroundPreserved": true,
+      "screenshotToolSucceeded": true,
+      "actionFocusPreserved": true,
+      "allActionsInBackground": true,
+      "activityAttributed": true,
+      "activityReleased": true,
+      "passed": true
+    },
+    {
+      "client": "grok",
+      "clientVersion": "grok 1.0.62 (1474f9cbdd91) [stable]",
+      "models": [
+        "grok-4.7-build"
+      ],
+      "elapsedSeconds": 42.26,
+      "toolCalls": 11,
+      "toolErrors": 0,
+      "tokenCorrect": true,
+      "optionCorrect": true,
+      "submittedExactlyOnce": true,
+      "foregroundPreserved": true,
+      "screenshotToolSucceeded": true,
+      "actionFocusPreserved": true,
+      "allActionsInBackground": true,
+      "activityAttributed": true,
+      "activityReleased": true,
+      "passed": true
+    }
+  ]
+}

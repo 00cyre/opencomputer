@@ -14,6 +14,8 @@ Screenshots above are from the real AppKit implementation using synthetic fixtur
 
 Each helper represents one session and its latest target app. Concurrent sessions stack their pills. Indicators remain until `release`, server exit, or target-app exit; they do not imply that the model is continuously dispatching an action. The action label is the latest operation. A paused focus guard stays visibly paused even after read-only inspection.
 
+When a mutation conflicts with your input, the dots turn amber and hover explains the wait: editing, clicking, scrolling, a held gesture, or a nearby pointer. The action was not dispatched or queued. A later fresh observation/action rechecks activity; the helper never replays the action by itself. A focus change remains a separate, latched pause.
+
 ## Ghost cursor
 
 ![Ghost cursor](assets/ghost-cursor.png)

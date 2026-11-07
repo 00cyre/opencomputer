@@ -18,6 +18,7 @@ npm run check
 | `native/ActivityOverlay.swift` | Non-activating dot/hover panel, visible-target ghost cursor, session stacking. |
 | `native/GhostMotion.swift` | Eased cursor travel and bounded idle floating, independent of the real pointer. |
 | `native/FocusGuard.swift` | Foreground app/window/control observations and mutation pause. |
+| `native/InteractionGuard.swift` / `InteractionPolicy.swift` | Fresh OS input/window observations and deterministic conflict decisions before dispatch. |
 | `native/NativeSupport.swift` | Shared accessibility helpers and native errors. |
 | `src/computer.mjs` | Native process lifecycle, serialization, timeout handling, app handles. |
 | `src/protocol.mjs` | MCP schemas, validation, protocol responses, image blocks. |
@@ -39,6 +40,7 @@ npm run test:activity
 npm run test:ui
 npm run test:focus
 npm run test:motion
+npm run test:interaction
 npm run package
 ```
 

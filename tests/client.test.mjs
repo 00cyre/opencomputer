@@ -45,3 +45,22 @@ test('explicit agent attribution overrides inferred client names and release rea
   try {assert.equal((await inferred.setClientInfo('grok-build')).agent,'grok-build');}
   finally {inferred.close();}
 });
+test('interaction preflight preserves the snapshot and window/subtree observations carry their scope',async()=>{
+  const c=new Computer({executable,apps:['*']});
+  try {
+    const app=c.getApp('cc.test');
+    await assert.rejects(app.checkInteraction(2),{code:'OBSERVE_REQUIRED'});
+    await assert.rejects(app.getAXState({root:2}),{code:'OBSERVE_REQUIRED'});
+    const window=await app.getAXState({window:1});
+    assert.equal(window.window,1);
+    const subtree=await app.getAXState({root:2});
+    assert.equal(subtree.root,2);
+    assert.equal(subtree.snapshot,'snapshot-1');
+    const decision=await app.checkInteraction(3);
+    assert.equal(decision.method,'checkInteraction');
+    assert.equal(decision.snapshot,'snapshot-1');
+    assert.equal((await app.click(3)).snapshot,'snapshot-1');
+    await assert.rejects(app.checkInteraction(3),{code:'OBSERVE_REQUIRED'});
+    assert.throws(()=>new Computer({executable,apps:['com.apple.*']}),TypeError);
+  } finally {c.close();}
+});

@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — 2026-11-07
+
+- Check user activity before every mutation: window ownership, focused editing, held gestures/keys, pointer proximity, and recent typing, clicks, scrolling, or pointer movement.
+- `USER_BUSY` returns a conflict reason, retry interval, and explicit no-dispatch evidence. The amber pill explains the wait; no actions are queued or automatically replayed.
+- Keep unrelated background windows available, including another window in the same app. Preserve the separate focus-change latch and never restore focus.
+- Read-only `checkInteraction` preflight, optional window/subtree observations, and explicit all-app access with `OPENCOMPUTER_APPS=*`.
+- Twenty-one deterministic interaction scenarios and expanded live tests protecting a focused editor while another window is edited.
+
+Runs on the existing Mac and its logged-in applications. Browser tab ownership, arbitrary coordinate control, and universal app compatibility are not provided by this update.
+
 ## 0.2.1 — 2026-11-06
 
 - Smooth ghost-cursor travel between targets with eased starts and stops.

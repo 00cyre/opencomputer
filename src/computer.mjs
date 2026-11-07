@@ -3,14 +3,14 @@ import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
 
 export class ComputerError extends Error {
-  constructor(code, message) { super(message); this.name = 'ComputerError'; this.code = code; }
+  constructor(code, message, details) { super(message); this.name = 'ComputerError'; this.code = code; if (details !== undefined) this.details = details; }
 }
 
 /** One connection owns one native process and one current accessibility snapshot. */
 export class Computer {
   #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent;
   constructor({apps = [], agent, overlay = true, executable = fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
-    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || !/^[a-zA-Z0-9._-]+$/.test(x))) throw new TypeError('apps must be exact bundle IDs');
+    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || (x !== '*' && !/^[a-zA-Z0-9._-]+$/.test(x)))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps');
     if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
     this.#explicitAgent = agent;
     this.timeoutMs = timeoutMs;
@@ -25,7 +25,7 @@ export class Computer {
       clearTimeout(pending.timer);
       try {
         const message = JSON.parse(line);
-        if (message.error) pending.reject(new ComputerError(message.error.code, message.error.message));
+        if (message.error) pending.reject(new ComputerError(message.error.code, message.error.message, message.error.details));
         else if (message.result && typeof message.result === 'object') pending.resolve(message.result);
         else { pending.reject(new ComputerError('PROTOCOL_ERROR', 'Invalid native response')); this.close(); }
       } catch (error) { pending.reject(error); this.close(); }
@@ -78,12 +78,17 @@ export class Computer {
 class App {
   #computer; #bundle; #snapshot;
   constructor(computer, bundle) { this.#computer = computer; this.#bundle = bundle; }
-  async getAXState() {
-    const result = await this.#computer.request('observe', {app:this.#bundle});
+  async getAXState({window, root} = {}) {
+    if (root !== undefined && !this.#snapshot) throw new ComputerError('OBSERVE_REQUIRED', 'Observe before expanding a subtree');
+    const result = await this.#computer.request('observe', {app:this.#bundle, window, root, ...(root === undefined ? {} : {snapshot:this.#snapshot})});
     this.#snapshot = result.snapshot;
     return result;
   }
   getScreenshot(windowId) { return this.#computer.request('screenshot', {app:this.#bundle, windowId}); }
+  checkInteraction(element) {
+    if (!this.#snapshot) return Promise.reject(new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before checking an element'));
+    return this.#computer.request('checkInteraction', {app:this.#bundle, snapshot:this.#snapshot, element});
+  }
   async #action(method, element, args = {}) {
     if (!this.#snapshot) throw new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before each action');
     const snapshot = this.#snapshot;

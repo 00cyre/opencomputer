@@ -23,6 +23,13 @@ test('preserves native errors as tool errors, not false successes',async () => {
   assert.equal(result.result.isError,true);
   assert.equal(JSON.parse(result.result.content[0].text).code,'APP_NOT_ALLOWED');
 });
+test('busy errors preserve retry guidance and no-dispatch evidence',async () => {
+  const details={canProceed:false,reason:'editing-window',retryAfterMs:1000,dispatched:false};
+  const result=await handle(request('tools/call',{name:'click',arguments:{app:'a',snapshot:'s',element:2}}),{request:async()=>{throw Object.assign(Error('Waiting'),{code:'USER_BUSY',details});}});
+  assert.equal(result.result.isError,true);
+  assert.deepEqual(JSON.parse(result.result.content[0].text).details,details);
+  assert.equal(tools.find(t=>t.name==='checkInteraction').annotations.readOnlyHint,true);
+});
 test('screenshots become image blocks with separate metadata',async () => {
   const result = await handle(request('tools/call',{name:'screenshot',arguments:{app:'a'}}),{request:async()=>({data:'YWJj',mimeType:'image/png',width:3})});
   assert.equal(result.result.content[0].type,'image');

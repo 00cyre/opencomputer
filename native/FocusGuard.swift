@@ -40,7 +40,7 @@ final class FocusGuard {
         }
     }
     func begin() throws -> FocusState {
-        guard !blocked else { try fail("FOCUS_PROTECTION_BLOCKED", "This session is paused after a focus change. Inspect the app and reconnect to continue; no focus restoration is attempted.") }
+        try requireAvailable()
         let state = FocusState.capture(); before = state; sawTransition = false
         if let pid = state.pid {
             var candidate: AXObserver?
@@ -62,13 +62,15 @@ final class FocusGuard {
     func finish() -> (FocusState,Bool) {
         let after = FocusState.capture()
         let changed = sawTransition || before.map { $0.differs(from:after) } == true
-        if let observer = observer { CFRunLoopRemoveSource(CFRunLoopGetMain(),AXObserverGetRunLoopSource(observer),.commonModes) }
-        observer = nil; before = nil
+        cancel()
         if changed { blocked = true }
         return (after,changed)
     }
-    func userIsEditing(_ target: NSRunningApplication) -> Bool {
-        guard NSWorkspace.shared.frontmostApplication?.processIdentifier == target.processIdentifier else { return false }
-        return [CGEventType.keyDown,.leftMouseDown,.rightMouseDown].contains { CGEventSource.secondsSinceLastEventType(.combinedSessionState,eventType:$0) < 0.75 }
+    func requireAvailable() throws {
+        guard !blocked else { try fail("FOCUS_PROTECTION_BLOCKED", "This session is paused after a focus change. Inspect the app and reconnect to continue; no focus restoration is attempted.") }
+    }
+    func cancel() {
+        if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(),AXObserverGetRunLoopSource(observer),.commonModes) }
+        observer = nil; before = nil
     }
 }

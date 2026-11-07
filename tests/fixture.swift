@@ -8,6 +8,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
     let output = ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_OUTPUT"] ?? "/tmp/opencomputer-fixture.json"
     var submissions = 0
     var cover: NSWindow?
+    var otherWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:80,y:80,width:520,height:300), styleMask:[.titled,.closable,.miniaturizable], backing:.buffered, defer:false)
         window.title = "OpenComputer Test Fixture"
@@ -30,6 +31,15 @@ final class Delegate: NSObject, NSApplicationDelegate {
         if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_TOP_RIGHT"] == "1", let screen = NSScreen.screens.first {
             window.setFrameOrigin(NSPoint(x:screen.visibleFrame.maxX-window.frame.width,y:screen.visibleFrame.maxY-window.frame.height))
         }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_AWAY_FROM_POINTER"] == "1", let screen = NSScreen.screens.first {
+            // Keep a newly launched benchmark away from the human's current work.
+            // Move only this disposable window; never reposition the real pointer.
+            let area = screen.visibleFrame.insetBy(dx:20,dy:20), pointer = NSEvent.mouseLocation
+            let origins = [NSPoint(x:area.minX,y:area.minY),NSPoint(x:area.maxX-window.frame.width,y:area.minY),NSPoint(x:area.minX,y:area.maxY-window.frame.height),NSPoint(x:area.maxX-window.frame.width,y:area.maxY-window.frame.height)]
+            if let origin = origins.max(by:{ a,b in
+                hypot(a.x+window.frame.width/2-pointer.x,a.y+window.frame.height/2-pointer.y) < hypot(b.x+window.frame.width/2-pointer.x,b.y+window.frame.height/2-pointer.y)
+            }) { window.setFrameOrigin(origin) }
+        }
         if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_FOCUS_TRAP"] == "1" {
             let trap = NSButton(title:"Focus trap",target:self,action:#selector(focusTrap))
             trap.frame = NSRect(x:250,y:85,width:160,height:34)
@@ -41,6 +51,15 @@ final class Delegate: NSObject, NSApplicationDelegate {
             coverButton.frame = NSRect(x:250,y:85,width:160,height:34)
             coverButton.setAccessibilityIdentifier("cover-ghost")
             window.contentView!.addSubview(coverButton)
+        }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_SECOND_WINDOW"] == "1" {
+            let other = NSWindow(contentRect:NSRect(x:640,y:80,width:360,height:180),styleMask:[.titled,.closable],backing:.buffered,defer:false)
+            other.title = "Other fixture window"; other.isReleasedWhenClosed = false
+            let otherField = NSTextField(string:"untouched")
+            otherField.frame = NSRect(x:20,y:80,width:320,height:32)
+            otherField.setAccessibilityIdentifier("background-input")
+            other.contentView!.addSubview(otherField)
+            other.orderFrontRegardless(); otherWindow = other
         }
         window.orderFrontRegardless()
         save()

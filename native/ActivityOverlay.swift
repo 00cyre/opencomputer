@@ -163,7 +163,7 @@ final class ActivityOverlay {
         if changed { view.appIcon = target.bundleURL.map { NSWorkspace.shared.icon(forFile:$0.path) }; pointOffset = nil; window = nil; windowID = nil }
         let root = AXUIElementCreateApplication(target.processIdentifier)
         AXUIElementSetMessagingTimeout(root, 0.15)
-        var selectedWindow = element.flatMap { axElement(attribute($0,kAXWindowAttribute)) }
+        var selectedWindow = element.flatMap { owningWindow($0) }
             ?? axElement(attribute(root,kAXFocusedWindowAttribute))
             ?? (attribute(root,kAXWindowsAttribute) as? [AXUIElement])?.first
         if let captureFrame = captureFrame {
@@ -189,6 +189,7 @@ final class ActivityOverlay {
         tick()
     }
     func markBlocked() { view.blocked = true; view.action = "Paused — focus changed. Reconnect to continue."; view.needsDisplay = true }
+    func markWaiting(_ reason: String) { view.blocked = true; view.action = cleanLabel(reason); view.needsDisplay = true }
     func release() {
         active = false; app = nil; window = nil; pointOffset = nil; windowID = nil
         panel.orderOut(nil); ghost.orderOut(nil); view.expanded = false
@@ -276,7 +277,7 @@ final class ActivityOverlay {
         if !ghost.isVisible { ghost.orderFrontRegardless() }
     }
     func state() -> [String:Any] {
-        ["enabled":enabled,"active":active,"agent":view.agent.name,"app":app?.bundleIdentifier ?? "", "action":view.action,
+        ["enabled":enabled,"active":active,"agent":view.agent.name,"app":app?.bundleIdentifier ?? "", "action":view.action,"windowTitle":view.windowTitle,
          "pillVisible":panel.isVisible,"ghostVisible":ghost.isVisible,"ghostFloating":ghost.isVisible && ghostMotion.isFloating(at:Date.timeIntervalSinceReferenceDate),"ghostReason":ghostReason,"expanded":view.expanded,"stackRow":row,
          "nonActivating":!panel.canBecomeKey && !panel.canBecomeMain && !ghost.canBecomeKey,
          "clickThrough":panel.ignoresMouseEvents && ghost.ignoresMouseEvents,

@@ -56,6 +56,19 @@ Configure a stdio command using the same executable, arguments, and environment.
 
 The three-dot animation and ghost cursor are enabled by default. Hover the dots for agent → app, window/tab title, and current action. Identity comes from the MCP client name; optionally add `OPENCOMPUTER_AGENT` to the server environment to choose a display label. `OPENCOMPUTER_OVERLAY=0` disables both visuals while keeping focus protection. Reconnect after updating the runtime or settings. [Details and screenshots](ACTIVITY.md).
 
+## Direct access to your Mac
+
+Set `OPENCOMPUTER_APPS` to `*` to explicitly allow all running apps, or keep a comma-separated list of exact bundle IDs. In the JavaScript client, use `apps: ['*']`. Each operation still targets a specific app and its own windows. Existing app/browser logins remain in place; there is no separate desktop, VM, profile copy, or new login flow.
+
+For Codex, register the local stdio server with its installed CLI:
+
+```sh
+codex mcp add opencomputer --env 'OPENCOMPUTER_APPS=*' -- \
+  /absolute/path/to/node /absolute/path/to/opencomputer/bin/opencomputer.mjs serve
+```
+
+Restart/reconnect your AI client after changing its configuration. Configure its instructions to use OpenComputer for computer control, wait and re-observe on `USER_BUSY`, and report unsupported actions instead of falling back to focus-stealing tools. Registering the server does not remove other installed plugins or hot-load tools into an existing conversation. Accessibility remains app-dependent, and a running browser's tabs share the same window for interaction checks.
+
 ## Troubleshooting
 
 | Error | Action |
@@ -67,7 +80,7 @@ The three-dot animation and ghost cursor are enabled by default. Hover the dots 
 | `SCREEN_RECORDING_REQUIRED` | Approve capture permission or use accessibility-only tools. |
 | `STALE_SNAPSHOT` | Observe again. IDs are scoped to one process, app, and snapshot. |
 | `AX_ERROR` | Re-observe; the control may not support that action. Use the returned action list. |
-| `USER_BUSY` | The user recently typed/clicked in the foreground target. Wait, observe, and retry when idle. |
+| `USER_BUSY` | Nothing dispatched or queued. Read `details.reason`, wait at least `details.retryAfterMs`, then observe and reconsider. A focused editor stays reserved during typing pauses. Other windows can remain available. |
 | `FOCUS_UNSAFE` | Use semantic controls or `setValue`; raw key injection and focus-setting actions are disabled. |
 | `FOCUS_CHANGED` / `FOCUS_PROTECTION_BLOCKED` | Inspect the outcome; a dispatched action may have completed. Further writes are paused until reconnect. Focus is never restored automatically. |
 | `TIMEOUT` | Create/reconnect the server, then re-observe. The action may have partially executed. |
