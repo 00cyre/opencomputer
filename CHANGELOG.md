@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.4.0 — 2026-11-10
+
+Background control that works on real apps, without interrupting the person at the Mac.
+
+- **Keys and typing in the background.** `pressKey` and key-delivered `typeText` post events to the target process only, so they never reach the app in use. `pressKey` is back in MCP discovery.
+- **Clicks that land.** `click` presses the element or its pressable container, or selects or focuses it. `clickPoint` does the same for a pixel of the last screenshot. No synthetic mouse events.
+- **`open`** launches an allowed app or opens a URL in it without activating it.
+- **Fast, compact observation.** Batched attribute reads; a default text outline with `query` search; `menu` and `limit` options; Chromium/Electron accessibility switched on automatically.
+- **Element IDs survive actions.** A snapshot lasts until the next full observe of that app, or 5 minutes; `root` and `menu` observations extend it.
+- **No more dead sessions.** An app that brings itself forward is sent back and the previous foreground app restored (`focusRestored`). `FOCUS_CHANGED` and `FOCUS_PROTECTION_BLOCKED` are gone.
+- **Far fewer `USER_BUSY` results.** Only activity in the same window blocks, and actions wait up to `waitMs` (default 2 s) for a pause before giving up.
+- `scroll` falls back to the scroll bar and takes `pages`; `performAction` adds `AXConfirm`, `AXCancel`, `AXScrollToVisible`; `getApp` takes `pid` for multi-instance apps.
+- The build replaces the helper binary atomically; `OPENCOMPUTER_NATIVE` selects another helper.
+
+**Changed:** `app.pressKey(key, {element})` replaces `pressKey(element, key)`. MCP `observe` returns text unless `format: "json"`. Hover, drag, right-click, and canvas-only controls remain unsupported.
+
 ## 0.3.0 — 2026-11-07
 
 - Check user activity before every mutation: window ownership, focused editing, held gestures/keys, pointer proximity, and recent typing, clicks, scrolling, or pointer movement.

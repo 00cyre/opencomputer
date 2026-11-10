@@ -188,7 +188,6 @@ final class ActivityOverlay {
         lastWindowRefresh = .distantPast
         tick()
     }
-    func markBlocked() { view.blocked = true; view.action = "Paused — focus changed. Reconnect to continue."; view.needsDisplay = true }
     func markWaiting(_ reason: String) { view.blocked = true; view.action = cleanLabel(reason); view.needsDisplay = true }
     func release() {
         active = false; app = nil; window = nil; pointOffset = nil; windowID = nil

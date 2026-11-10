@@ -1,25 +1,29 @@
 # API reference
 
-A `Computer` instance owns a serial native helper connection. `getApp(bundleId)` creates a handle; it does not launch, activate, or inspect that app. Actions require an explicitly allowed, already-running app.
+A `Computer` instance owns a serial native helper connection. `getApp(bundleId)` creates a handle. Every operation names one explicitly allowed app, and nothing the helper does moves the pointer, takes keyboard focus, or brings an app forward.
 
 ## JavaScript
 
 | Method | Result |
 | --- | --- |
-| `computer.status()` | Permissions, allowed bundle IDs, version, foreground app, activity state, and `focusProtectionBlocked`. |
-| `computer.getState()` | Running regular app names, bundle IDs, PIDs, allowlist status. |
-| `computer.getApp(bundleId)` | App handle. |
-| `app.getAXState({window?, root?}?)` | Fresh snapshot, node array, and window list. Optionally select a window or expand a subtree. |
-| `app.checkInteraction(element)` | Read-only conflict check for a fresh element. Does not consume the snapshot or reserve the window. |
+| `computer.status()` | Permissions, allowed bundle IDs, version, foreground app, activity state, default `waitMs`, and `focusRestorations`. |
+| `computer.getState()` | Running regular apps: name, bundle ID, PID, frontmost, hidden, allowlist status. |
+| `computer.getApp(bundleId, {pid}?)` | App handle. Pass `pid` when several instances of one bundle run. |
+| `app.open(url?)` | Launch the app, or open an `http`, `https`, or `file` URL in it, without activating it. |
+| `app.getAXState({window?, root?, menu?, limit?}?)` | Snapshot, node array, and window list. Select a window, expand a subtree, or read the menu bar. |
 | `app.getScreenshot(windowId?)` | PNG data/metadata, or `selectionRequired` with candidate windows. |
-| `app.click(element)` | `AXPress`. Requires the control to expose it. |
-| `app.setValue(element, value)` | Replace a writable accessibility value. |
-| `app.performSecondaryAction(element, action)` | `AXPress`, `AXIncrement`, `AXDecrement`, or `AXPick`, if supported. |
-| `app.typeText(element, text)` | Replace the exposed selected range through `AXValue`; no key events or focus changes. |
-| `app.pressKey(element, key)` | Compatibility method that rejects with `FOCUS_UNSAFE`. Removed from MCP discovery in 0.2. |
-| `app.scroll(element, direction)` | Accessibility page scroll, if the app supports it. |
-| `computer.release()` | Hide this session’s indicators and invalidate its snapshot. Does not reset a focus block. |
-| `computer.close()` | Stop helper and reject pending work. |
+| `app.click(element)` | Press, select, or focus the element, or the control containing it. No pointer. |
+| `app.clickPoint(x, y)` | The same press on the element under a pixel of the last screenshot of this app. |
+| `app.setValue(element, value)` | Replace a writable accessibility value (text or number). |
+| `app.typeText(element, text, {keys}?)` | Insert at the caret through `AXValue`; falls back to key events sent to this app only. |
+| `app.pressKey(key, {element?, count?}?)` | Send a key or shortcut to this app only. |
+| `app.scroll(element, direction, pages?)` | Scroll the area containing the element by pages. |
+| `app.performSecondaryAction(element, action)` | `AXPress`, `AXIncrement`, `AXDecrement`, `AXPick`, `AXConfirm`, `AXCancel`, or `AXScrollToVisible`, if the element lists it. |
+| `app.checkInteraction(element?, {intrusive}?)` | Read-only conflict check. Actions repeat it themselves. |
+| `computer.release()` | Hide this session's indicators and drop its snapshots. |
+| `computer.close()` | Stop the helper and reject pending work. |
+
+Every action also accepts `{waitMs}` in its trailing options.
 
 ```js
 const computer = createComputer({
@@ -30,57 +34,94 @@ const computer = createComputer({
 });
 ```
 
-An explicit `agent` takes priority over MCP `initialize.clientInfo.name`; otherwise the server derives the display identity from that client name. Custom names use an initial when no known installed AI icon is available. Identity is presentation metadata, not authentication. The optional `executable` overrides the helper path for embedding/testing. A timeout terminates the connection, preventing a late reply from being applied to a later request. **Do not blindly retry a timed-out action: inspect its outcome first.**
+An explicit `agent` takes priority over MCP `initialize.clientInfo.name`. Identity is presentation metadata, not authentication. `executable`, or the `OPENCOMPUTER_NATIVE` environment variable, overrides the helper path. A timeout terminates the connection, preventing a late reply from being applied to a later request. **Do not blindly retry a timed-out action: inspect its outcome first.**
 
-`apps: ['*']` explicitly enables all running apps. Each request still names one bundle ID, and snapshots, window captures, and mutations remain scoped to its process. The default is still no app access. This uses the apps and logged-in sessions on the current Mac; it creates no VM and copies no credentials.
+`apps: ['*']` explicitly enables all running apps. Each request still names one bundle ID, and snapshots, captures, and actions remain scoped to its process. The default is no app access. This uses the apps and logged-in sessions on the current Mac; it creates no VM and copies no credentials.
 
-Each snapshot contains `snapshot`, `app`, `pid`, `nodes`, `truncated`, and `frontmostApp`. Nodes have `id`, `role`, `parent`, `depth`, available labels/values, `enabled`, `settable`, supported `actions`, and a `frame` when available. Frames use macOS global accessibility coordinates; screenshot pixels may be scaled and are not action coordinates.
+## Observing
 
-Trees are bounded to 600 nodes, depth 24, and 4000 characters per string. `truncated: true` means the whole tree was not returned. `windows` lists the app's window indices, titles, and minimized state. Pass `{window: index}` to inspect one window, or `{root: elementId}` to expand a subtree from the previous snapshot. These options cannot be combined. MCP subtree requests also supply the previous `snapshot`; the JavaScript handle supplies it automatically. Every observation replaces the snapshot. Window indices can change, so verify the returned title before acting. These are accessibility window indices, distinct from screenshot `windowId` values. Subtree expansion is not sibling pagination: an exceptionally wide subtree can still truncate. The helper uses a two-second accessibility messaging timeout for observations; the client enforces an overall request timeout.
+A snapshot contains `snapshot`, `app`, `pid`, `nodes`, `windows`, `truncated`, `elapsedMs`, and `frontmostApp`. Nodes have `id`, `role`, `parent`, available labels/values, `enabled`, `settable`, supported `actions`, and a `frame` in macOS global accessibility coordinates.
 
-Element IDs belong to the latest observation in that connection, for the same process and bundle ID, for up to 60 seconds. Dispatch consumes the snapshot even if the action fails. Pre-dispatch rejections such as `USER_BUSY` do not dispatch; always re-observe before retrying. Observing another app or calling `release` invalidates previous IDs. The JavaScript app handle requires a fresh observation after every attempted action.
+Attributes are read in one batched call per element, so a typical window of about a thousand elements reads in well under a second. Trees are bounded to `limit` nodes (default 1200, at most 5000) and 4000 characters per string; `truncated: true` means more exists. Narrow with `{window: index}`, `{root: elementId}`, or the MCP `query` argument rather than raising the limit.
 
-## Focus protection and text
+Element IDs stay valid across actions. A full or window observe of an app replaces that app's snapshot; `root` and `menu` observations extend the current one and keep existing IDs. Snapshots expire 5 minutes after their last use and are scoped to one process. A stale or foreign ID fails with `STALE_SNAPSHOT`.
 
-Successful action responses include `dispatched`, `verificationRequired`, `frontmostBefore`, `frontmostAfter`, `focusChanged: false`, and `activity`. They report dispatch, not task success. Observe to verify outcomes.
+Chromium and Electron apps build their accessibility tree on demand. The first observe switches it on (`webAccessibilityEnabled: true`); observe again if page content is missing.
 
-The helper never activates the target, sets its focus, injects raw keyboard events, or restores the foreground app. Every mutation checks the current foreground window, editable focus, pointer hit-test and proximity, held mouse buttons/keys, and recent keyboard/click/scroll/movement activity immediately before dispatch. A background window of the same app can remain available while the foreground window is being edited.
+## Acting without the pointer or the foreground
+
+| Action | How it is delivered |
+| --- | --- |
+| `click`, `clickPoint` | `AXPress` on the element or a pressable container up to three levels up; otherwise `AXSelected`, `AXPick`, or the app's own text focus (`AXFocused`). The result's `delivery` names which, and `pressed` describes the container when it differs. |
+| `setValue` | `AXValue`. Numeric controls take numbers. |
+| `typeText` | `AXValue` plus `AXSelectedTextRange` when the control exposes both. Otherwise, or with `keys: true`, Unicode key events posted to the target process. Key delivery is limited to 2000 characters per call. |
+| `pressKey` | Key events posted to the target process with their own modifier state. Names: `Return`, `Tab`, `Escape`, `Space`, `Delete`, `ForwardDelete`, arrows, `Home`, `End`, `PageUp`, `PageDown`, `F1`–`F12`, or a character, with `cmd`, `ctrl`, `alt`, `shift`, `fn` joined by `+`. |
+| `scroll` | `AXScroll*ByPage`, or the enclosing scroll area's scroll bar value. |
+
+Key events are posted to one process ID, never to the login session, so they cannot reach the app the person is typing in. No synthetic mouse events are ever posted, and the real pointer never moves.
+
+Results include `dispatched`, `delivery`, `frontmostBefore`, `frontmostAfter`, `focusChanged`, `focusRestored`, and `verificationRequired`. `confirmed: false` means the app did not reply within three seconds, which is normal for a control that opens a modal dialog or menu. A result reports dispatch, not task success: observe to verify.
+
+### Limits
+
+- **Keys go to the app's own focus.** A background app keeps a focused control per window; `pressKey` and key-typed text land there. Pass `element` to move that focus first. Some apps ignore key events while inactive, and some shortcuts are handled by the system rather than the app. Verify by observing.
+- **No hover, drag, right-click, or pixel-exact click.** `clickPoint` resolves a pixel to an accessibility element; canvases, games, and custom-drawn controls with no accessible element return `UNSUPPORTED_TARGET`.
+- **`AXShowMenu` and `AXRaise`** return `FOCUS_UNSAFE`: they open a menu under the pointer or raise a window.
+- **Secure text fields** are rejected (`SECURE_FIELD`) for values, clicks, and keys.
+- Minimized windows, locked screens, and apps with incomplete accessibility support may not work.
+
+Unsupported actions return an error. They never fall back to global input.
+
+## Staying out of the person's way
+
+Each action samples the person's activity immediately before dispatch. Only work in the same place blocks:
 
 | Signal | Behavior |
 | --- | --- |
-| Mouse button held | Wait globally; a drag can cross app boundaries. |
-| Focused text editor in the target window | Keep that window reserved even during typing pauses. |
-| Key or shortcut held | Wait when the target is the foreground window or under the pointer. |
-| Pointer within 64 points of the target control, in its visible window | Wait until it moves away. Occlusion by another app does not count as pointer proximity. |
-| Typing in the target window | Wait for 2 seconds of keyboard quiet. |
-| Clicking / scrolling in or over the target window | Wait 1.2 / 1.5 seconds respectively. |
-| Pointer moving over the target window | Wait for 0.8 seconds of quiet. |
-| Required foreground, window, pointer, or input information unavailable | Reject the write until it can be checked. |
+| Activity in other apps, or in another window of the target app | Never blocks. |
+| Mouse button held in the target app or over its window | Wait. |
+| Key-delivered action while the person used the target app in the last 3 s | Wait (`app-in-use`): keys would land in their focus. |
+| Person typed into an editor in the target window in the last 3 s | Wait (`editing-window`). |
+| Key held in, or pointer over, the target window | Wait (`keyboard-held`). |
+| Pointer on the target control and moved or clicked in the last 1 s | Wait (`pointer-near-target`). |
+| Typing / clicking / scrolling in the target window | Wait 1.5 / 0.8 / 0.8 s of quiet. |
 
-Conflicts return `USER_BUSY` with `details.canProceed: false`, `details.reason`, `details.retryAfterMs`, and `details.dispatched: false`. The pill turns amber and explains the wait on hover. Nothing is queued, and this does not permanently block the connection. The client should wait the suggested interval, re-observe, reconsider the action, and try again only if still appropriate. A delay is not permission to proceed. Work in unrelated windows can continue. `checkInteraction` exposes the same check without dispatch, but its answer is advisory: every mutation samples again. Native errors preserve `details` in MCP output and `ComputerError.details`.
+An action waits up to `waitMs` (default 2000, at most 10000; `OPENCOMPUTER_WAIT_MS` sets the default) for the conflict to clear, re-sampling every 150 ms, and then runs. If it does not clear, the action returns `USER_BUSY` with `details.reason`, `details.retryAfterMs`, `details.waitedMs`, and `details.dispatched: false`. Nothing is queued. Retry later or work in another window.
 
-The focus guard records foreground app/window/control and watches activation and focus notifications through dispatch and a 150 ms settling interval.
+Some apps bring themselves forward when a control is pressed. The helper watches for an activation the person did not cause — no click, modifier, or key from them — and hands the foreground back to the app they were in. The result then carries `focusChanged: true` and `focusRestored: true`, and the session stays usable. Late self-activations are undone for 1.5 s after the action returns. A switch the person makes themselves is left alone. This is correction after the fact: a self-activating app can flash forward for a moment, and public macOS APIs cannot prevent that.
 
-If focus changes, the action returns `FOCUS_CHANGED` and may already have executed. Further writes return `FOCUS_PROTECTION_BLOCKED`. Read-only inspection and `release` remain available; reconnect only after inspecting the outcome. The indicator shows the paused state. User-initiated switches during this interval also pause the session conservatively. Apps can activate themselves later or omit accessibility notifications, so this is detection and containment, not a universal focus lock.
-
-Quiet input does not establish that a person has stopped reading, and a user can start interacting between the check and dispatch. Browser tabs are treated as part of their window; there is no per-tab ownership detection or browser DOM adapter. Unsupported controls remain unsupported; this guard does not enable global input as a fallback.
-
-`typeText` needs both a readable `AXValue` and a valid `AXSelectedTextRange`. It replaces that range without moving the caret or sending keys. Unsupported controls return `FOCUS_UNSAFE`; use `setValue` to replace the full value. Text and final replacement values are limited to 16000 UTF-16 units. Secure fields are rejected. Menu-show, confirm/cancel, global key, coordinate-click, and drag actions are not exposed.
-
-`scroll` takes `up`, `down`, `left`, or `right`. It sends `AXScroll*ByPage` to the selected element and returns `AX_ERROR` when unsupported. It never falls back to a global scroll event.
+The check and the dispatch are not atomic, and input silence does not prove the person stopped reading. Browser tabs are part of their window; there is no per-tab ownership.
 
 ## Activity state
 
-Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, and helper window IDs/geometry for diagnostics. These are current observations, not a persistent activity log. See [activity behavior](ACTIVITY.md).
+Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, and helper window IDs/geometry for diagnostics. See [activity behavior](ACTIVITY.md).
 
 ## MCP
 
-Tool names are `status`, `apps`, `observe`, `screenshot`, `checkInteraction`, `click`, `setValue`, `performAction`, `typeText`, `scroll`, and `release`. Clients add their own server-name prefix. Call `release` when the task ends so a persistent MCP server does not keep showing the last task.
+Tools: `status`, `apps`, `open`, `observe`, `screenshot`, `checkInteraction`, `click`, `clickPoint`, `setValue`, `performAction`, `typeText`, `pressKey`, `scroll`, and `release`. Clients add their own server-name prefix. Use `tools/list` for the canonical schemas.
 
-Every app operation takes `app`. Every action and interaction check also takes `snapshot` and integer `element`; action-specific arguments match the JavaScript table. Use `tools/list` for the canonical schemas. Screenshots use image blocks plus text metadata; other tools use JSON encoded in text blocks. Native errors are `isError: true` tool results with `code`, `message`, and optional `details`. Invalid JSON-RPC or schema arguments return protocol errors.
+`observe` returns a compact text outline by default, one line per useful element:
 
-Only stdio is supported. Requests are serialized. The server supports `initialize`, `ping`, `tools/list`, `tools/call`, and ignores notifications; it advertises no resources, prompts, streaming, or cancellation. The stop control is terminating the process. A request line is limited to 1 MiB after reading; this is a local-process protocol, not a hardened parser for remote hostile streams.
+```
+app com.apple.TextEdit pid 412 snapshot 9F2C…
+38 elements in 21 ms; frontmost app: com.apple.Terminal
+windows: [0] "Untitled" main
+
+[0] Window "Untitled"
+  [4] TextArea ="Hello" editable focused
+  [9] Button "Close" actions:Press
+```
+
+Unlabelled containers are dropped and their children move up a level. `query` lists only elements whose role, label, identifier, or value contain every word, which is the fastest way to find a control in a large app. `format: "json"` returns every node with its frame.
+
+Screenshots use image blocks plus text metadata. Native errors are `isError: true` tool results with `code`, `message`, and optional `details`. Invalid JSON-RPC or schema arguments return protocol errors.
+
+Only stdio is supported. Requests are serialized per connection. The server supports `initialize`, `ping`, `tools/list`, `tools/call`, and ignores notifications. A request line is limited to 1 MiB.
+
+### Any agent, several at once
+
+Every MCP client starts its own server and helper process, so any number of agents can work at the same time, each with its own indicator. macOS attributes Accessibility and Screen Recording to the app that launched the server, so each agent host needs its own approval once. Two agents acting on the same window are not coordinated with each other.
 
 ## Native protocol
 
-The helper accepts newline-delimited JSON with `method` plus arguments and returns one `result` or `error` object per line. The JavaScript client is the supported integration boundary. The helper itself checks the allowlist, macOS permissions, process identity, secure fields, snapshot ownership, and expiry. Host configuration of the display identity is not an agent-facing MCP tool.
+The helper accepts newline-delimited JSON with `method` plus arguments and returns one `result` or `error` object per line. The JavaScript client is the supported integration boundary. The helper itself checks the allowlist, macOS permissions, process identity, secure fields, snapshot ownership, and expiry.

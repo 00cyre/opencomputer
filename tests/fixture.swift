@@ -1,12 +1,13 @@
 import AppKit
 
-final class Delegate: NSObject, NSApplicationDelegate {
+final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var window: NSWindow!
     let field = NSTextField(string: "")
     let status = NSTextField(labelWithString: "Waiting for submission")
     let consent = NSButton(checkboxWithTitle: "Enable test option", target: nil, action: nil)
     let output = ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_OUTPUT"] ?? "/tmp/opencomputer-fixture.json"
     var submissions = 0
+    var returns = 0
     var cover: NSWindow?
     var otherWindow: NSWindow?
     func applicationDidFinishLaunching(_ notification: Notification) {
@@ -20,6 +21,7 @@ final class Delegate: NSObject, NSApplicationDelegate {
         field.placeholderString = "Enter benchmark token"
         field.setAccessibilityIdentifier("benchmark-input")
         field.setAccessibilityLabel("Benchmark token")
+        field.delegate = self
         consent.frame = NSRect(x:28,y:135,width:460,height:28)
         consent.setAccessibilityIdentifier("benchmark-option")
         let button = NSButton(title:"Submit benchmark", target:self, action:#selector(submit))
@@ -79,13 +81,19 @@ final class Delegate: NSObject, NSApplicationDelegate {
             self.window.makeFirstResponder(self.field)
         }
     }
+    // Counts Return presses that reach the field, however they were delivered.
+    func control(_ control: NSControl, textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+        guard selector == #selector(NSResponder.insertNewline(_:)) else { return false }
+        returns += 1; save()
+        return true
+    }
     @objc func submit() {
         submissions += 1
         status.stringValue = "Submitted: \(field.stringValue) | option: \(consent.state == .on ? "on" : "off")"
         save()
     }
     func save() {
-        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
+        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
         if let data = try? JSONSerialization.data(withJSONObject:state, options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:URL(fileURLWithPath:output), options:.atomic) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication) -> Bool { true }

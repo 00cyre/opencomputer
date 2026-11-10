@@ -2,101 +2,184 @@ import AppKit
 import ApplicationServices
 import ScreenCaptureKit
 
+// Element IDs stay valid until the next full observe of the same app; expanding a
+// subtree adds to the snapshot instead of replacing it.
+final class Snapshot {
+    let id = UUID().uuidString
+    let pid: pid_t
+    let bundle: String
+    var elements: [AXUIElement] = []
+    var index: [CFHashCode:[Int]] = [:]
+    var time = Date()
+    init(pid: pid_t, bundle: String) { self.pid = pid; self.bundle = bundle }
+    func register(_ element: AXUIElement) -> Int {
+        let hash = CFHash(element)
+        if let found = index[hash]?.first(where: { CFEqual(elements[$0],element) }) { return found }
+        elements.append(element)
+        index[hash,default:[]].append(elements.count-1)
+        return elements.count-1
+    }
+}
+
 @MainActor
 final class Computer {
     let allowed: Set<String>
     let overlay = ActivityOverlay()
     let focus = FocusGuard()
     let interaction = InteractionGuard()
-    var snapshotID = ""
-    var snapshotPID: pid_t = 0
-    var snapshotBundle = ""
-    var elements: [AXUIElement] = []
-    var snapshotTime = Date.distantPast
+    var snapshots: [pid_t:Snapshot] = [:]
+    var captures: [pid_t:(window: CGWindowID, scale: CGFloat)] = [:]
+    var webEnabled: Set<pid_t> = []
+    let defaultWait: Int
+    static let observed = [kAXRoleAttribute,kAXSubroleAttribute,kAXTitleAttribute,kAXDescriptionAttribute,kAXIdentifierAttribute,kAXValueAttribute,
+                           kAXEnabledAttribute,kAXFocusedAttribute,kAXSelectedAttribute,kAXPlaceholderValueAttribute,kAXPositionAttribute,kAXSizeAttribute,kAXChildrenAttribute]
+    static let textRoles = [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole,"AXSearchField"]
+    // Chromium and Firefox build their web accessibility tree only when asked.
+    static let browsers = ["com.google.Chrome","com.brave.Browser","com.microsoft.edgemac","company.thebrowser.Browser","com.vivaldi.Vivaldi","com.operasoftware.Opera","org.chromium.Chromium","org.mozilla.firefox","ai.perplexity.comet","com.openai.atlas"]
     init() {
-        allowed = Set((ProcessInfo.processInfo.environment["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let env = ProcessInfo.processInfo.environment
+        allowed = Set((env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
     }
-    func target(_ request: [String: Any]) throws -> NSRunningApplication {
+    func permit(_ request: [String: Any]) throws -> String {
         let bundle = try string(request, "app")
         guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
+        return bundle
+    }
+    func target(_ request: [String: Any]) throws -> NSRunningApplication {
+        let bundle = try permit(request)
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
-        guard apps.count == 1, let app = apps.first else { try fail("APP_NOT_RUNNING", "Open exactly one instance of \(bundle), then try again.") }
-        return app
+        if let pid = request["pid"] as? Int {
+            guard let app = apps.first(where: { Int($0.processIdentifier) == pid }) else { try fail("APP_NOT_RUNNING", "No running instance of \(bundle) has pid \(pid). Call apps for current pids.") }
+            return app
+        }
+        if let id = request["snapshot"] as? String, let snapshot = snapshots.values.first(where: { $0.id == id && $0.bundle == bundle }),
+           let app = apps.first(where: { $0.processIdentifier == snapshot.pid }) { return app }
+        guard !apps.isEmpty else { try fail("APP_NOT_RUNNING", "\(bundle) is not running. Call open to launch it in the background, then observe.") }
+        // Helper and background instances share a bundle ID with the app people see.
+        let regular = apps.filter { $0.activationPolicy == .regular }
+        let pool = regular.isEmpty ? apps : regular
+        if pool.count == 1 { return pool[0] }
+        return pool.first { !((attribute(AXUIElementCreateApplication($0.processIdentifier),kAXWindowsAttribute) as? [AXUIElement]) ?? []).isEmpty } ?? pool[0]
     }
     func trusted() throws {
         guard AXIsProcessTrusted() else { try fail("ACCESSIBILITY_REQUIRED", "Allow the launching host (Terminal, Claude, Grok, or OpenComputer helper) in System Settings > Privacy & Security > Accessibility, then restart it.") }
     }
-    func element(_ request: [String: Any], _ app: NSRunningApplication) throws -> AXUIElement {
-        guard try string(request, "snapshot") == snapshotID, app.processIdentifier == snapshotPID,
-              app.bundleIdentifier == snapshotBundle, Date().timeIntervalSince(snapshotTime) < 60,
-              let index = request["element"] as? Int, elements.indices.contains(index) else {
-            try fail("STALE_SNAPSHOT", "Observe the app again and use an element from that snapshot. Snapshots expire after 60 seconds or any action.")
+    func element(_ request: [String: Any], _ app: NSRunningApplication, key: String = "element") throws -> AXUIElement {
+        guard let snapshot = snapshots[app.processIdentifier], (request["snapshot"] as? String) == snapshot.id,
+              Date().timeIntervalSince(snapshot.time) < 300, let index = request[key] as? Int, snapshot.elements.indices.contains(index) else {
+            try fail("STALE_SNAPSHOT", "Observe the app again and use an element from that snapshot. A snapshot is replaced by the next full observe of the same app and expires after 5 minutes.")
         }
-        let item = elements[index]
+        let item = snapshot.elements[index]
         if attribute(item, kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole {
             try fail("SECURE_FIELD", "Secure text fields are excluded from automation.")
         }
         return item
     }
-    func observe(_ app: NSRunningApplication, _ request: [String:Any]) throws -> [String: Any] {
-        let applicationRoot = AXUIElementCreateApplication(app.processIdentifier)
-        AXUIElementSetMessagingTimeout(applicationRoot, 2)
-        let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
-        var root = applicationRoot
-        if request["root"] != nil {
-            guard request["window"] == nil, let index = request["root"] as? Int else { try fail("INVALID_ARGUMENT","Use either window or root, not both.") }
-            var reference = request; reference["element"] = index
-            root = try element(reference,app)
-        } else if let index = request["window"] as? Int {
-            guard windows.indices.contains(index) else { try fail("INVALID_WINDOW","Choose a window index returned by observe. Window indices may change; verify the returned title.") }
-            root = windows[index]
+    func label(_ element: AXUIElement) -> String {
+        let names = [kAXTitleAttribute,kAXDescriptionAttribute].compactMap { attribute(element,$0) as? String }.filter { !$0.isEmpty }
+        return cleanLabel(names.first ?? roleOf(element).replacingOccurrences(of:"AX",with:""),limit:45)
+    }
+    func describe(_ element: AXUIElement) -> [String:Any] { ["role":roleOf(element),"label":label(element)] }
+    func enableWeb(_ app: NSRunningApplication) -> Bool {
+        let pid = app.processIdentifier
+        guard !webEnabled.contains(pid) else { return false }
+        webEnabled.insert(pid)
+        let root = AXUIElementCreateApplication(pid)
+        var enabled = AXUIElementSetAttributeValue(root,"AXManualAccessibility" as CFString,kCFBooleanTrue) == .success
+        if let bundle = app.bundleIdentifier, Computer.browsers.contains(where: { bundle.hasPrefix($0) }) {
+            enabled = AXUIElementSetAttributeValue(root,"AXEnhancedUserInterface" as CFString,kCFBooleanTrue) == .success || enabled
         }
-        elements = []
-        snapshotID = UUID().uuidString
-        snapshotPID = app.processIdentifier
-        snapshotBundle = app.bundleIdentifier ?? ""
-        snapshotTime = Date()
+        return enabled
+    }
+    // One IPC round trip per element instead of one per attribute.
+    func values(_ element: AXUIElement) -> [CFTypeRef?] {
+        var raw: CFArray?
+        guard AXUIElementCopyMultipleAttributeValues(element,Computer.observed as CFArray,AXCopyMultipleAttributeOptions(rawValue:0),&raw) == .success,
+              let list = raw as? [AnyObject], list.count == Computer.observed.count else { return Computer.observed.map { attribute(element,$0) } }
+        return list.map { value in
+            if value is NSNull { return nil }
+            if CFGetTypeID(value) == AXValueGetTypeID(), AXValueGetType(unsafeBitCast(value,to:AXValue.self)) == .axError { return nil }
+            return value
+        }
+    }
+    func observe(_ app: NSRunningApplication, _ request: [String:Any]) async throws -> [String: Any] {
+        let started = Date()
+        let pid = app.processIdentifier
+        let applicationRoot = AXUIElementCreateApplication(pid)
+        AXUIElementSetMessagingTimeout(applicationRoot, 2)
+        let webJustEnabled = enableWeb(app)
+        if webJustEnabled { try? await Task.sleep(nanoseconds:350_000_000) }
+        let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
+        let main = axElement(attribute(applicationRoot,kAXMainWindowAttribute)) ?? axElement(attribute(applicationRoot,kAXFocusedWindowAttribute))
+        let menu = request["menu"] as? Bool ?? false
+        guard [request["root"] != nil, request["window"] != nil, menu].filter({ $0 }).count <= 1 else { try fail("INVALID_ARGUMENT","Use only one of window, root, or menu.") }
+        var roots: [AXUIElement]
+        var snapshot = snapshots[pid]
+        if request["root"] != nil {
+            roots = [try element(request,app,key:"root")]
+        } else if menu {
+            guard let bar = axElement(attribute(applicationRoot,kAXMenuBarAttribute)) else { try fail("UNSUPPORTED_TARGET","This app does not expose a menu bar.") }
+            roots = [bar]
+            if snapshot == nil || Date().timeIntervalSince(snapshot!.time) >= 300 { snapshot = nil }
+        } else {
+            if let index = request["window"] as? Int {
+                guard windows.indices.contains(index) else { try fail("INVALID_WINDOW","Choose a window index returned by observe. Window indices may change; verify the returned title.") }
+                roots = [windows[index]]
+            } else {
+                roots = windows.sorted { a, _ in main.map { CFEqual(a,$0) } ?? false }
+                if roots.isEmpty { roots = [applicationRoot] }
+            }
+            snapshot = nil
+        }
+        let current = snapshot ?? Snapshot(pid:pid,bundle:app.bundleIdentifier ?? "")
+        current.time = Date()
+        snapshots[pid] = current
+        let limit = min(5000,max(1,request["limit"] as? Int ?? 1200))
+        let deadline = started.addingTimeInterval(4)
         var nodes: [[String: Any]] = []
+        var seen: Set<Int> = []
         var truncated = false
         func walk(_ element: AXUIElement, _ depth: Int, _ parent: Int?) {
-            guard elements.count < 600, depth <= 24 else { truncated = true; return }
-            if elements.contains(where: { CFEqual($0, element) }) { return }
-            let index = elements.count
-            elements.append(element)
-            let role = attribute(element, kAXRoleAttribute) as? String ?? "AXUnknown"
-            let subrole = attribute(element, kAXSubroleAttribute) as? String ?? ""
+            guard nodes.count < limit, depth <= 60, Date() < deadline else { truncated = true; return }
+            let index = current.register(element)
+            guard seen.insert(index).inserted else { return }
+            let v = values(element)
+            let role = v[0] as? String ?? "AXUnknown"
+            let subrole = v[1] as? String ?? ""
             let secure = subrole == kAXSecureTextFieldSubrole
             var node: [String: Any] = ["id": index, "role": role, "depth": depth]
             if let parent = parent { node["parent"] = parent }
             if !subrole.isEmpty { node["subrole"] = subrole }
-            for (key, name) in [("title", kAXTitleAttribute), ("description", kAXDescriptionAttribute), ("identifier", kAXIdentifierAttribute), ("value", kAXValueAttribute)] {
+            for (key, value) in [("title",v[2]),("description",v[3]),("identifier",v[4]),("value",v[5]),("placeholder",v[9])] {
                 if secure && key == "value" { node[key] = "[redacted]"; continue }
-                if let value = attribute(element, name) as? String { node[key] = String(value.prefix(4000)) }
-                else if let value = attribute(element, name) as? NSNumber { node[key] = value }
+                if let text = value as? String { if !text.isEmpty || key == "value" { node[key] = String(text.prefix(4000)) } }
+                else if let number = value as? NSNumber { node[key] = number }
             }
-            node["enabled"] = (attribute(element, kAXEnabledAttribute) as? Bool) ?? true
-            var settable: DarwinBoolean = false
-            AXUIElementIsAttributeSettable(element, kAXValueAttribute as CFString, &settable)
-            node["settable"] = settable.boolValue && !secure
-            var actions: CFArray?
-            AXUIElementCopyActionNames(element, &actions)
-            node["actions"] = actions as? [String] ?? []
-            if let raw = attribute(element, kAXPositionAttribute), CFGetTypeID(raw) == AXValueGetTypeID(),
-               let sizeRaw = attribute(element, kAXSizeAttribute), CFGetTypeID(sizeRaw) == AXValueGetTypeID() {
+            node["enabled"] = (v[6] as? Bool) ?? true
+            if v[7] as? Bool == true { node["focused"] = true }
+            if v[8] as? Bool == true { node["selected"] = true }
+            let text = Computer.textRoles.contains(role)
+            node["settable"] = !secure && role != kAXStaticTextRole && (text || v[5] != nil) && isSettable(element,kAXValueAttribute)
+            node["actions"] = role == kAXStaticTextRole ? [] : actionNames(element)
+            if let p = v[10], let s = v[11], CFGetTypeID(p) == AXValueGetTypeID(), CFGetTypeID(s) == AXValueGetTypeID() {
                 var point = CGPoint.zero; var size = CGSize.zero
-                AXValueGetValue(unsafeBitCast(raw, to: AXValue.self), .cgPoint, &point)
-                AXValueGetValue(unsafeBitCast(sizeRaw, to: AXValue.self), .cgSize, &size)
+                AXValueGetValue(unsafeBitCast(p, to: AXValue.self), .cgPoint, &point)
+                AXValueGetValue(unsafeBitCast(s, to: AXValue.self), .cgSize, &size)
                 node["frame"] = ["x": point.x, "y": point.y, "width": size.width, "height": size.height]
             }
             nodes.append(node)
             if !secure {
-                for child in attribute(element, kAXChildrenAttribute) as? [AXUIElement] ?? [] { walk(child, depth + 1, index) }
+                for child in v[12] as? [AXUIElement] ?? [] { walk(child, depth + 1, index) }
             }
         }
-        walk(root, 0, nil)
-        var result: [String:Any] = ["app": snapshotBundle, "pid": snapshotPID, "snapshot": snapshotID, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
-            "windows":windows.enumerated().map { index, window in ["index":index,"title":attribute(window,kAXTitleAttribute) as? String ?? "","minimized":attribute(window,kAXMinimizedAttribute) as? Bool ?? false] as [String:Any] }]
+        for root in roots { walk(root, 0, nil) }
+        var result: [String:Any] = ["app": current.bundle, "pid": pid, "snapshot": current.id, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
+            "elapsedMs": Int(Date().timeIntervalSince(started)*1000),
+            "windows":windows.enumerated().map { index, window in ["index":index,"title":attribute(window,kAXTitleAttribute) as? String ?? "","minimized":attribute(window,kAXMinimizedAttribute) as? Bool ?? false,"main":main.map { CFEqual(window,$0) } ?? false] as [String:Any] }]
         if let index = request["window"] as? Int { result["selectedWindow"] = index }
+        if webJustEnabled { result["webAccessibilityEnabled"] = true }
+        overlay.track(app,element:roots.first.flatMap { owningWindow($0) },action:"Reading window")
         return result
     }
     func screenshot(_ app: NSRunningApplication, _ request: [String: Any]) async throws -> [String: Any] {
@@ -109,13 +192,15 @@ final class Computer {
             guard let selected = windows.first(where: { $0.windowID == id }) else { try fail("INVALID_WINDOW", "windowId must belong to the allowed app.") }
             window = selected
         } else {
-            guard windows.count == 1 else {
-                return ["selectionRequired": true, "windows": windows.map { ["windowId": $0.windowID, "title": $0.title ?? ""] as [String: Any] }]
+            // Apps keep invisible utility windows around; one visible window needs no selection.
+            let visible = windows.filter { $0.isOnScreen }
+            let candidates = visible.isEmpty ? windows : visible
+            guard candidates.count == 1 else {
+                return ["selectionRequired": true, "windows": candidates.map { ["windowId": $0.windowID, "title": $0.title ?? "", "onScreen": $0.isOnScreen] as [String: Any] }]
             }
-            window = windows[0]
+            window = candidates[0]
         }
         overlay.track(app,title:window.title,captureWindowID:window.windowID,captureFrame:window.frame,action:"Capturing window")
-        if focus.blocked { overlay.markBlocked() }
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
         let scale = min(1, 1600 / max(window.frame.width, window.frame.height))
@@ -125,96 +210,261 @@ final class Computer {
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
-        return ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
+        captures[app.processIdentifier] = (window.windowID,scale)
+        return ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "scale": scale, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
+    }
+    // Screenshot pixel -> the element this app has there. The hit test is scoped to the
+    // app, so windows of other apps on top of it do not matter and are never read.
+    func hitTest(_ app: NSRunningApplication, _ request: [String:Any]) throws -> AXUIElement {
+        guard let capture = captures[app.processIdentifier] else { try fail("SCREENSHOT_REQUIRED","Take a screenshot of this app first; clickPoint coordinates are pixels in the most recent screenshot.") }
+        guard let x = (request["x"] as? NSNumber)?.doubleValue, let y = (request["y"] as? NSNumber)?.doubleValue else { try fail("INVALID_ARGUMENT","x and y must be numbers") }
+        guard let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow],capture.window) as? [[String:Any]])?.first,
+              let raw = info[kCGWindowBounds as String] as? NSDictionary, let bounds = CGRect(dictionaryRepresentation:raw as CFDictionary) else {
+            try fail("NO_WINDOW","The captured window is gone. Take a new screenshot.")
+        }
+        let point = CGPoint(x:bounds.minX+x/capture.scale,y:bounds.minY+y/capture.scale)
+        guard bounds.contains(point) else { try fail("INVALID_ARGUMENT","The point is outside the captured window.") }
+        var hit: AXUIElement?
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(point.x),Float(point.y),&hit) == .success, let hit else {
+            try fail("UNSUPPORTED_TARGET","The app exposes no accessible element at that point. Observe and use an element instead.")
+        }
+        if let window = owningWindow(hit), let frame = elementFrame(window),
+           abs(frame.minX-bounds.minX) > 3 || abs(frame.minY-bounds.minY) > 3 || abs(frame.width-bounds.width) > 3 || abs(frame.height-bounds.height) > 3 {
+            try fail("UNSUPPORTED_TARGET","Another window of this app covers that point. Observe the window and use an element instead.")
+        }
+        if attribute(hit,kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole { try fail("SECURE_FIELD","Secure text fields are excluded from automation.") }
+        return hit
+    }
+    // What "click" means for an element, without a pointer: press it or the control
+    // that contains it, select it, or put the app's own text focus in it.
+    func pressPlan(_ element: AXUIElement) -> (AXUIElement,String)? {
+        let barriers = [kAXWindowRole,kAXApplicationRole,"AXWebArea",kAXScrollAreaRole,kAXSheetRole,kAXSplitGroupRole,kAXTabGroupRole,kAXMenuBarRole]
+        func chain(_ hops: Int) -> [AXUIElement] {
+            var items = [element]
+            while items.count <= hops, let parent = parentOf(items.last!), !barriers.contains(roleOf(parent)) { items.append(parent) }
+            return items
+        }
+        if Computer.textRoles.contains(roleOf(element)), isSettable(element,kAXFocusedAttribute) { return (element,kAXFocusedAttribute) }
+        let near = chain(3)
+        if let item = near.first(where: { actionNames($0).contains(kAXPressAction) }) { return (item,kAXPressAction) }
+        if let item = near.prefix(3).first(where: { isSettable($0,kAXSelectedAttribute) }) { return (item,kAXSelectedAttribute) }
+        if actionNames(element).contains(kAXPickAction) { return (element,kAXPickAction) }
+        if isSettable(element,kAXFocusedAttribute) { return (element,kAXFocusedAttribute) }
+        return nil
+    }
+    // false: the app did not answer in time. Controls that open a modal dialog or menu
+    // run the action and reply only when it closes, so this is not a failure.
+    func perform(_ element: AXUIElement, _ action: String) throws -> Bool {
+        AXUIElementSetMessagingTimeout(element,3)
+        if action == kAXSelectedAttribute || action == kAXFocusedAttribute {
+            try axCheck(AXUIElementSetAttributeValue(element,action as CFString,kCFBooleanTrue),action)
+            return true
+        }
+        let result = AXUIElementPerformAction(element,action as CFString)
+        if result == .cannotComplete { return false }
+        try axCheck(result,action)
+        return true
+    }
+    func scrollPlan(_ element: AXUIElement, _ direction: String) -> (String,() throws -> Void)? {
+        let action = "AXScroll\(direction.capitalized)ByPage"
+        let vertical = direction == "up" || direction == "down"
+        let sign: Double = direction == "down" || direction == "right" ? 1 : -1
+        var current: AXUIElement? = element
+        for _ in 0..<12 {
+            guard let item = current else { break }
+            if actionNames(item).contains(action) { return (action,{ try axCheck(AXUIElementPerformAction(item,action as CFString),action) }) }
+            if roleOf(item) == kAXScrollAreaRole, let bar = axElement(attribute(item,vertical ? kAXVerticalScrollBarAttribute : kAXHorizontalScrollBarAttribute)), isSettable(bar,kAXValueAttribute) {
+                var step = 0.25
+                if let visible = elementFrame(item), let content = (attribute(item,kAXContentsAttribute) as? [AXUIElement])?.first.flatMap({ elementFrame($0) }) {
+                    let (shown,total) = vertical ? (visible.height,content.height) : (visible.width,content.width)
+                    if total > shown + 1 { step = min(1,Double(shown/(total-shown))*0.9) }
+                }
+                return ("AXScrollBar",{
+                    let value = (attribute(bar,kAXValueAttribute) as? NSNumber)?.doubleValue ?? 0
+                    try axCheck(AXUIElementSetAttributeValue(bar,kAXValueAttribute as CFString,NSNumber(value:min(1,max(0,value+sign*step)))),"AXScrollBar")
+                })
+            }
+            current = parentOf(item)
+        }
+        return nil
+    }
+    func focusForKeys(_ element: AXUIElement) async -> Bool {
+        if attribute(element,kAXFocusedAttribute) as? Bool == true { return true }
+        guard AXUIElementSetAttributeValue(element,kAXFocusedAttribute as CFString,kCFBooleanTrue) == .success else { return false }
+        try? await Task.sleep(nanoseconds:60_000_000)
+        return true
+    }
+    func open(_ request: [String:Any]) async throws -> [String:Any] {
+        let bundle = try permit(request)
+        guard let location = NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { try fail("APP_NOT_FOUND","No installed app has bundle ID \(bundle).") }
+        let config = NSWorkspace.OpenConfiguration()
+        config.activates = false
+        config.addsToRecentItems = false
+        var urls: [URL] = []
+        if let raw = request["url"] as? String {
+            guard let url = URL(string:raw), ["http","https","file"].contains(url.scheme?.lowercased() ?? "") else { try fail("INVALID_ARGUMENT","url must be an http, https, or file URL.") }
+            urls = [url]
+        }
+        let before = focus.begin(target:nil)
+        do {
+            let app = urls.isEmpty ? try await NSWorkspace.shared.openApplication(at:location,configuration:config)
+                                   : try await NSWorkspace.shared.open(urls,withApplicationAt:location,configuration:config)
+            focus.expect(app.processIdentifier)
+            let outcome = await focus.finish(settleMs:250)
+            overlay.track(app,action:urls.isEmpty ? "Opening app" : "Opening link")
+            return ["opened":true,"app":bundle,"pid":app.processIdentifier,"frontmostBefore":before.bundle,"frontmostAfter":outcome.after,"focusChanged":outcome.changed,"focusRestored":outcome.restored]
+        } catch let error as Failure { focus.cancel(); throw error }
+        catch { focus.cancel(); try fail("OPEN_FAILED","Could not open \(bundle): \(error.localizedDescription)") }
     }
     func handle(_ request: [String: Any]) async throws -> [String: Any] {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.3.0", "activity":overlay.state(), "focusProtectionBlocked":focus.blocked]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.4.0", "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
         case "release":
-            overlay.release(); snapshotID = ""; elements = []
+            overlay.release(); snapshots = [:]; captures = [:]
             return ["released":true]
         case "apps":
             let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
-                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "allowed": allowed.contains("*") || allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
+                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "frontmost": $0.isActive, "hidden": $0.isHidden, "allowed": allowed.contains("*") || allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
             }
             return ["apps": apps.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }]
+        case "open": return try await open(request)
         default: break
         }
-        guard ["observe", "screenshot", "checkInteraction", "click", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
+        guard ["observe", "screenshot", "checkInteraction", "click", "clickPoint", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
         let app = try target(request)
+        let pid = app.processIdentifier
         if method == "screenshot" { return try await screenshot(app, request) }
         try trusted()
-        if method == "observe" {
-            let result = try observe(app,request)
-            overlay.track(app,element:elements.first,action:"Reading window")
-            if focus.blocked { overlay.markBlocked() }
-            return result
+        if method == "observe" { return try await observe(app,request) }
+        let elementOptional = ["checkInteraction","pressKey","clickPoint"].contains(method)
+        var item: AXUIElement? = method == "clickPoint" ? try hitTest(app,request)
+            : (!elementOptional || request["element"] != nil) ? try element(request,app) : nil
+        if method == "checkInteraction" { return interaction.assess(app,element:item,intrusive:request["intrusive"] as? Bool ?? false).json }
+        // Everything that can be refused is decided before the person's activity is checked.
+        var intrusive = false
+        var settle = 15
+        var verb = "Using"
+        var info: [String:Any] = [:]
+        let run: () async throws -> [String:Any]
+        switch method {
+        case "click", "clickPoint":
+            let hit = item!
+            guard let plan = pressPlan(hit) else {
+                throw Failure(code:method == "click" ? "UNSUPPORTED_ACTION" : "UNSUPPORTED_TARGET",message:"Nothing pressable here: this element and its container expose no press, select, or focus action. Try a nearby control from observe.",details:describe(hit))
+            }
+            if method == "clickPoint" { info["target"] = describe(hit) }
+            if !CFEqual(plan.0,hit) { info["pressed"] = describe(plan.0) }
+            item = plan.0
+            intrusive = plan.1 == kAXFocusedAttribute
+            settle = 60; verb = "Clicking"
+            run = { try self.perform(plan.0,plan.1) ? ["delivery":plan.1] : ["delivery":plan.1,"confirmed":false] }
+        case "setValue":
+            let target = item!
+            guard let value = request["value"] as? String, value.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "value must be a string of at most 16000 UTF-16 units") }
+            verb = "Editing"
+            run = {
+                // Sliders, steppers, and similar controls hold numbers.
+                if attribute(target,kAXValueAttribute) is NSNumber, !(attribute(target,kAXValueAttribute) is NSString), let number = Double(value) {
+                    try axCheck(AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, NSNumber(value:number)), "AXValue")
+                } else {
+                    try axCheck(AXUIElementSetAttributeValue(target, kAXValueAttribute as CFString, value as CFString), "AXValue")
+                }
+                return ["delivery":kAXValueAttribute]
+            }
+        case "performAction":
+            let target = item!
+            let action = try string(request, "action")
+            if [kAXShowMenuAction,kAXRaiseAction].contains(action) { try fail("FOCUS_UNSAFE", "This action raises a window or opens a menu at the pointer. Use a specific control instead.") }
+            let supported = [kAXPressAction, kAXIncrementAction, kAXDecrementAction, kAXPickAction, kAXConfirmAction, kAXCancelAction, "AXScrollToVisible"]
+            guard supported.contains(action) else { try fail("INVALID_ARGUMENT", "Use one of \(supported.joined(separator:", ")).") }
+            guard actionNames(target).contains(action) else { try fail("UNSUPPORTED_ACTION","This element does not offer \(action). Its actions are listed in the snapshot.") }
+            settle = 60
+            run = { try self.perform(target,action) ? ["delivery":action] : ["delivery":action,"confirmed":false] }
+        case "typeText":
+            let target = item!
+            let text = try string(request,"text")
+            guard text.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT","text must be at most 16000 UTF-16 units") }
+            verb = "Editing"
+            var range = CFRange()
+            let current = attribute(target,kAXValueAttribute) as? String
+            let semantic = !(request["keys"] as? Bool ?? false) && current != nil && isSettable(target,kAXValueAttribute)
+                && attribute(target,kAXSelectedTextRangeAttribute).map { CFGetTypeID($0) == AXValueGetTypeID() && AXValueGetValue(unsafeBitCast($0,to:AXValue.self),.cfRange,&range) } == true
+                && range.location >= 0 && range.length >= 0 && range.location <= (current! as NSString).length && range.length <= (current! as NSString).length-range.location
+            if semantic {
+                let replacement = (current! as NSString).replacingCharacters(in:NSRange(location:range.location,length:range.length),with:text)
+                guard replacement.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "Result exceeds 16000 UTF-16 units") }
+                run = {
+                    try axCheck(AXUIElementSetAttributeValue(target,kAXValueAttribute as CFString,replacement as CFString),"AXValue")
+                    var caret = CFRange(location:range.location+(text as NSString).length,length:0)
+                    if let value = AXValueCreate(.cfRange,&caret) { AXUIElementSetAttributeValue(target,kAXSelectedTextRangeAttribute as CFString,value) }
+                    return ["delivery":kAXValueAttribute]
+                }
+            } else {
+                guard text.count <= 2000 else { try fail("INVALID_ARGUMENT","This control only accepts typed keys, limited to 2000 characters per call. Split the text or use setValue.") }
+                intrusive = true; settle = 60
+                run = {
+                    let focused = await self.focusForKeys(target)
+                    Keys.type(text,to:pid)
+                    return ["delivery":"keys","elementFocused":focused]
+                }
+            }
+        case "pressKey":
+            let stroke = try Keys.parse(try string(request,"key"))
+            let count = min(50,max(1,request["count"] as? Int ?? 1))
+            let target = item
+            if target == nil, let focused = axElement(attribute(AXUIElementCreateApplication(pid),kAXFocusedUIElementAttribute)),
+               attribute(focused,kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole { try fail("SECURE_FIELD","The app's focus is in a secure text field; keys are not sent there.") }
+            intrusive = true; settle = 60; verb = "Pressing \(cleanLabel(request["key"] as? String ?? "",limit:20)) in"
+            run = {
+                var result: [String:Any] = ["delivery":"keys"]
+                if let target { result["elementFocused"] = await self.focusForKeys(target) }
+                Keys.post(stroke,to:pid,count:count)
+                return result
+            }
+        case "scroll":
+            let direction = try string(request, "direction")
+            guard ["up","down","left","right"].contains(direction) else { try fail("INVALID_ARGUMENT", "direction must be up/down/left/right") }
+            let pages = min(20,max(1,request["pages"] as? Int ?? 1))
+            guard let plan = scrollPlan(item!,direction) else {
+                try fail("UNSUPPORTED_ACTION","Nothing scrollable contains this element. Use performAction AXScrollToVisible on the element you want to reach, or pressKey PageDown.")
+            }
+            verb = "Scrolling"
+            run = { for _ in 0..<pages { try plan.1() }; return ["delivery":plan.0] }
+        default: try fail("UNKNOWN_METHOD", method)
         }
-        let item = try element(request, app)
-        try focus.requireAvailable()
-        if method == "checkInteraction" { return interaction.assess(app,element:item).json }
-        if method == "pressKey" { try fail("FOCUS_UNSAFE", "Raw keyboard injection is disabled to protect user focus. Use semantic accessibility controls or setValue instead.") }
-        if method == "performAction", let action = request["action"] as? String, [kAXShowMenuAction,kAXConfirmAction,kAXCancelAction].contains(action) {
-            try fail("FOCUS_UNSAFE", "This action can move focus. Use a specific semantic control instead.")
+        overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))")
+        var before = focus.begin(target:pid)
+        var decision = interaction.assess(app,element:item,intrusive:intrusive,foreground:before)
+        let wait = min(10000,max(0,request["waitMs"] as? Int ?? defaultWait))
+        let deadline = Date().addingTimeInterval(Double(wait)/1000)
+        // A brief pause in the person's activity is usually all an action needs.
+        while !decision.canProceed, Date() < deadline {
+            overlay.markWaiting(decision.message)
+            try? await Task.sleep(nanoseconds:150_000_000)
+            before = focus.begin(target:pid)
+            decision = interaction.assess(app,element:item,intrusive:intrusive,foreground:before)
         }
-        let label = cleanLabel((attribute(item,kAXTitleAttribute) as? String) ?? (attribute(item,kAXDescriptionAttribute) as? String) ?? "control",limit:45)
-        let verbs = ["click":"Clicking", "setValue":"Editing", "typeText":"Editing", "scroll":"Scrolling", "performAction":"Using"]
-        overlay.track(app,element:item,action:"\(verbs[method] ?? "Using") \(label)")
-        let before = try focus.begin()
-        let decision = interaction.assess(app,element:item,foreground:before)
         if !decision.canProceed {
             focus.cancel()
             overlay.markWaiting(decision.message)
             var details = decision.json
             details["dispatched"] = false
-            throw Failure(code:"USER_BUSY",message:decision.message + " Re-observe and check again before retrying; this action was not queued.",details:details)
+            details["waitedMs"] = wait
+            throw Failure(code:"USER_BUSY",message:decision.message + " Nothing was dispatched or queued. Retry after retryAfterMs; the snapshot is still valid.",details:details)
         }
+        if wait > 0 { overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))") }
         var dispatchError: Error?
-        do {
-        // Consume before dispatch: even a partially failed action must be re-observed.
-        snapshotID = ""
-        switch method {
-        case "click": try axCheck(AXUIElementPerformAction(item, kAXPressAction as CFString), "AXPress")
-        case "setValue":
-            guard let value = request["value"] as? String, value.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "value must be a string of at most 16000 UTF-16 units") }
-            try axCheck(AXUIElementSetAttributeValue(item, kAXValueAttribute as CFString, value as CFString), "AXValue")
-        case "performAction":
-            let action = try string(request, "action")
-            let supported = [kAXPressAction, kAXIncrementAction, kAXDecrementAction, kAXPickAction]
-            guard supported.contains(action) else { try fail("INVALID_ARGUMENT", "Use a supported action listed in the snapshot") }
-            try axCheck(AXUIElementPerformAction(item, action as CFString), action)
-        case "typeText":
-            let text = try string(request,"text")
-            guard text.utf16.count <= 16000,
-                  let selected = attribute(item,kAXSelectedTextRangeAttribute), CFGetTypeID(selected) == AXValueGetTypeID(),
-                  let current = attribute(item,kAXValueAttribute) as? String else { try fail("FOCUS_UNSAFE", "This control does not expose safe text replacement. Use setValue.") }
-            var range = CFRange()
-            guard AXValueGetValue(unsafeBitCast(selected,to:AXValue.self),.cfRange,&range), range.location >= 0, range.length >= 0,
-                  range.location <= (current as NSString).length, range.length <= (current as NSString).length-range.location else { try fail("INVALID_SELECTION", "Observe the text control again") }
-            let replacement = (current as NSString).replacingCharacters(in:NSRange(location:range.location,length:range.length),with:text)
-            guard replacement.utf16.count <= 16000 else { try fail("INVALID_ARGUMENT", "Result exceeds 16000 UTF-16 units") }
-            try axCheck(AXUIElementSetAttributeValue(item,kAXValueAttribute as CFString,replacement as CFString),"AXValue")
-        case "scroll":
-            let direction = try string(request, "direction")
-            let actions = ["up": "AXScrollUpByPage", "down": "AXScrollDownByPage", "left": "AXScrollLeftByPage", "right": "AXScrollRightByPage"]
-            guard let action = actions[direction] else { try fail("INVALID_ARGUMENT", "direction must be up/down/left/right") }
-            try axCheck(AXUIElementPerformAction(item, action as CFString), action)
-        default: try fail("UNKNOWN_METHOD", method)
-        }
-        } catch { dispatchError = error }
-        try? await Task.sleep(nanoseconds: 150_000_000)
-        let (after,changed) = focus.finish()
-        if changed {
-            overlay.markBlocked()
-            try fail("FOCUS_CHANGED", "Focus changed during dispatch; the action may have executed. Further actions in this session are blocked. The user's focus was not restored or overridden.")
-        }
+        do { info.merge(try await run()) { _, new in new } } catch { dispatchError = error }
+        let outcome = await focus.finish(settleMs:settle)
         if let error = dispatchError { throw error }
-        return ["dispatched":true,"method":method,"frontmostBefore":before.bundle,"frontmostAfter":after.bundle,"focusChanged":false,"verificationRequired":true,"activity":overlay.state()]
+        var result: [String:Any] = ["dispatched":true,"method":method,"frontmostBefore":before.bundle,"frontmostAfter":outcome.after,"focusChanged":outcome.changed,"focusRestored":outcome.restored,"verificationRequired":true,"activity":overlay.state()]
+        result.merge(info) { _, new in new }
+        return result
     }
 }
 let application = NSApplication.shared
@@ -224,7 +474,7 @@ func write(_ value: [String: Any]) {
     if let data = try? JSONSerialization.data(withJSONObject:value,options:[.sortedKeys]), let text = String(data:data,encoding:.utf8) { print(text); fflush(stdout) }
 }
 // Read input off the main thread; keep the AppKit event loop alive between tool calls.
-// The semaphore serializes dispatch so a connection still owns exactly one snapshot.
+// The semaphore serializes dispatch so requests on one connection never interleave.
 DispatchQueue.global(qos:.userInitiated).async {
     while let line = readLine() {
         let completed = DispatchSemaphore(value:0)

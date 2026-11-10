@@ -75,14 +75,14 @@ Restart/reconnect your AI client after changing its configuration. Configure its
 | --- | --- |
 | `HELPER_UNAVAILABLE` | Build the source or restore `build/opencomputer-native` from the runtime ZIP. |
 | `APP_NOT_ALLOWED` | Add the exact bundle ID to `OPENCOMPUTER_APPS` and restart the server. |
-| `APP_NOT_RUNNING` | Open exactly one instance of the target app yourself. |
+| `APP_NOT_RUNNING` | Call `open`, or start the app yourself. With several instances, pass `pid`. |
 | `ACCESSIBILITY_REQUIRED` | Approve the launching host and restart it. |
 | `SCREEN_RECORDING_REQUIRED` | Approve capture permission or use accessibility-only tools. |
-| `STALE_SNAPSHOT` | Observe again. IDs are scoped to one process, app, and snapshot. |
+| `STALE_SNAPSHOT` | Observe again. IDs last until the next full observe of that app, or 5 minutes. |
 | `AX_ERROR` | Re-observe; the control may not support that action. Use the returned action list. |
-| `USER_BUSY` | Nothing dispatched or queued. Read `details.reason`, wait at least `details.retryAfterMs`, then observe and reconsider. A focused editor stays reserved during typing pauses. Other windows can remain available. |
-| `FOCUS_UNSAFE` | Use semantic controls or `setValue`; raw key injection and focus-setting actions are disabled. |
-| `FOCUS_CHANGED` / `FOCUS_PROTECTION_BLOCKED` | Inspect the outcome; a dispatched action may have completed. Further writes are paused until reconnect. Focus is never restored automatically. |
+| `USER_BUSY` | You are working in that same window and did not pause within `waitMs`. Nothing was dispatched or queued. Retry after `details.retryAfterMs`, or work in another window. |
+| `FOCUS_UNSAFE` | `AXShowMenu` and `AXRaise` open a menu at the pointer or raise a window. Use a specific control. |
+| `UNSUPPORTED_ACTION` / `UNSUPPORTED_TARGET` | The control exposes nothing pressable or scrollable. Try a nearby element, `pressKey`, or `clickPoint`. |
 | `TIMEOUT` | Create/reconnect the server, then re-observe. The action may have partially executed. |
 | `selectionRequired` | Choose a returned window ID, then call `screenshot` again. |
 

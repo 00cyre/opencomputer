@@ -11,59 +11,49 @@ const fixture=spawn(resolve('build/OpenComputer Fixture.app/Contents/MacOS/fixtu
 const c=createComputer({apps:['cc.opencomputer.fixture'],agent:'Focus test'});
 let checks=0;
 const assert=new Proxy(strict,{get(target,key){const value=target[key];return typeof value==='function'?(...args)=>{checks++;return value(...args);}:value;}});
+const delay=ms=>new Promise(r=>setTimeout(r,ms));
 try{
   let ready=false;
-  for(let i=0;i<50;i++){try{await readFile(output);ready=true;break;}catch{await new Promise(r=>setTimeout(r,100));}}
+  for(let i=0;i<50;i++){try{await readFile(output);ready=true;break;}catch{await delay(100);}}
   assert.ok(ready);
   const app=c.getApp('cc.opencomputer.fixture');
   const before=await c.status();
   assert.notEqual(before.frontmostApp,'cc.opencomputer.fixture','fixture must begin in background');
   let tree=await app.getAXState();
-  await assert.rejects(app.click(tree.nodes.find(n=>n.identifier==='focus-trap').id),{code:'FOCUS_CHANGED'});
-  assert.equal((await c.status()).focusProtectionBlocked,true);
+  // The trap brings the fixture forward. The helper hands the foreground back and keeps working.
+  const trapped=await app.click(tree.nodes.find(n=>n.identifier==='focus-trap').id);
+  assert.equal(trapped.dispatched,true);
+  assert.equal(trapped.focusChanged,true,'the app-side activation is reported');
+  assert.equal(trapped.focusRestored,true,'the foreground is handed back');
+  assert.equal(trapped.frontmostAfter,before.frontmostApp);
+  await delay(400);
+  let status=await c.status();
+  assert.equal(status.frontmostApp,before.frontmostApp,'the person keeps the app they were in');
+  assert.equal(status.focusProtectionBlocked,false,'a restored activation does not block the session');
+  assert.ok(status.focusRestorations>=1);
+  // The same snapshot and session stay usable, in either window.
+  const field=tree.nodes.find(n=>n.identifier==='benchmark-input');
+  assert.equal((await app.checkInteraction(field.id)).canProceed,true);
+  assert.equal((await app.setValue(field.id,'after-trap')).focusChanged,false);
   tree=await app.getAXState();
-  assert.match((await c.status()).activity.action,/Paused/);
-  await assert.rejects(app.setValue(tree.nodes.find(n=>n.identifier==='benchmark-input').id,'must not write'),{code:'FOCUS_PROTECTION_BLOCKED'});
-  await c.release();
-  assert.equal((await c.status()).focusProtectionBlocked,true,'release must not bypass the focus latch');
-  // A fresh connection still respects the user's focused editor. No synthetic
-  // typing or pointer movements are needed to exercise the production detector.
-  const fresh=createComputer({apps:['*'],agent:'Interaction test'});
-  try {
-    const windows=fresh.getApp('cc.opencomputer.fixture');
-    tree=await windows.getAXState();
-    const field=tree.nodes.find(n=>n.identifier==='benchmark-input');
-    const decision=await windows.checkInteraction(field.id);
-    assert.equal(decision.canProceed,false);
-    assert.equal(decision.reason,'editing-window');
-    await assert.rejects(windows.setValue(field.id,'must not write'),error=>{
-      assert.equal(error.code,'USER_BUSY');
-      assert.equal(error.details.dispatched,false);
-      assert.equal(error.details.reason,'editing-window');
-      assert.ok(error.details.retryAfterMs>0);
-      return true;
-    });
-    const waiting=await fresh.status();
-    assert.match(waiting.activity.action,/Waiting/);
-    assert.equal(waiting.focusProtectionBlocked,false,'ordinary activity does not latch a permanent focus block');
-    tree=await windows.getAXState();
-    assert.equal(tree.nodes.find(n=>n.identifier==='benchmark-input').value,'','busy rejection leaves the field untouched');
-    const other=tree.windows.find(w=>w.title==='Other fixture window');
-    assert.ok(other);
-    tree=await windows.getAXState({window:other.index});
-    assert.equal((await fresh.status()).activity.windowTitle,'Other fixture window','the pill names the observed window');
-    assert.ok(!tree.nodes.some(n=>n.identifier==='benchmark-input'),'window observation excludes the foreground editor');
-    let background=tree.nodes.find(n=>n.identifier==='background-input');
-    assert.ok(background);
-    tree=await windows.getAXState({root:background.id});
-    assert.equal(tree.nodes[0].identifier,'background-input','subtree expansion resolves the selected element');
-    assert.equal(tree.nodes.length,1);
-    assert.equal((await windows.checkInteraction(0)).canProceed,true,'an unrelated window of the same app remains available');
-    assert.equal((await windows.setValue(0,'background-work')).focusChanged,false);
-    tree=await windows.getAXState();
-    assert.equal(tree.nodes.find(n=>n.identifier==='background-input').value,'background-work');
-    assert.equal(tree.nodes.find(n=>n.identifier==='benchmark-input').value,'');
-    assert.equal((await fresh.status()).frontmostApp,'cc.opencomputer.fixture');
-    console.log(JSON.stringify({passed:checks,detectedFocusChange:true,furtherActionsBlocked:true,editingWindowProtected:true,unrelatedWindowWritable:true}));
-  } finally {await fresh.release().catch(()=>{});fresh.close();}
+  assert.equal(tree.nodes.find(n=>n.identifier==='benchmark-input').value,'after-trap');
+  const other=tree.windows.find(w=>w.title==='Other fixture window');
+  assert.ok(other);
+  tree=await app.getAXState({window:other.index});
+  assert.equal((await c.status()).activity.windowTitle,'Other fixture window','the pill names the observed window');
+  assert.ok(!tree.nodes.some(n=>n.identifier==='benchmark-input'),'window observation is scoped to that window');
+  const background=tree.nodes.find(n=>n.identifier==='background-input');
+  assert.ok(background);
+  const subtree=await app.getAXState({root:background.id});
+  assert.equal(subtree.snapshot,tree.snapshot,'subtree expansion extends the current snapshot');
+  assert.equal(subtree.nodes[0].id,background.id,'expanded elements keep their ids');
+  assert.equal((await app.setValue(background.id,'background-work')).focusChanged,false);
+  tree=await app.getAXState();
+  assert.equal(tree.nodes.find(n=>n.identifier==='background-input').value,'background-work');
+  assert.equal(tree.nodes.find(n=>n.identifier==='benchmark-input').value,'after-trap');
+  // A preflight needs no element: it asks whether keys could go to this app now.
+  const preflight=await app.checkInteraction(undefined,{intrusive:true});
+  assert.equal(typeof preflight.canProceed,'boolean');
+  assert.equal((await c.status()).frontmostApp,before.frontmostApp);
+  console.log(JSON.stringify({passed:checks,activationReported:true,foregroundRestored:true,sessionUsable:true,unrelatedWindowWritable:true}));
 }finally{await c.release().catch(()=>{});c.close();fixture.kill();await rm(dir,{recursive:true,force:true});}

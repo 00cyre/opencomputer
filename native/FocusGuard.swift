@@ -14,63 +14,76 @@ struct FocusState {
                           window:root.flatMap { axElement(attribute($0,kAXFocusedWindowAttribute)) },
                           element:root.flatMap { axElement(attribute($0,kAXFocusedUIElementAttribute)) })
     }
-    func differs(from other: FocusState) -> Bool {
-        func same(_ a: AXUIElement?, _ b: AXUIElement?) -> Bool {
-            switch (a,b) { case let (a?,b?): return CFEqual(a,b); case (nil,nil): return true; default: return false }
-        }
-        return pid != other.pid || !same(window,other.window) || !same(element,other.element)
-    }
 }
 
+// Some apps activate themselves when a control is pressed. The helper never asks for
+// that, so an activation the user did not cause is undone by handing the foreground
+// back to the app they were in. The session stays usable either way.
 @MainActor
 final class FocusGuard {
-    var before: FocusState?
-    var observer: AXObserver?
-    var activationToken: NSObjectProtocol?
-    var sawTransition = false
-    var blocked = false
+    private var previous: NSRunningApplication?
+    private var target: pid_t?
+    private var watchUntil = Date.distantPast
+    private var activationToken: NSObjectProtocol?
+    private var changed = false
+    private var restored = false
+    private(set) var restorations = 0
     init() {
         activationToken = NSWorkspace.shared.notificationCenter.addObserver(forName:NSWorkspace.didActivateApplicationNotification,object:nil,queue:.main) { [weak self] note in
             MainActor.assumeIsolated {
-                guard let self = self, let before = self.before,
-                      let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication,
-                      app.processIdentifier != before.pid else { return }
-                self.sawTransition = true
+                guard let app = note.userInfo?[NSWorkspace.applicationUserInfoKey] as? NSRunningApplication else { return }
+                self?.activated(app)
             }
         }
     }
-    func begin() throws -> FocusState {
-        try requireAvailable()
-        let state = FocusState.capture(); before = state; sawTransition = false
-        if let pid = state.pid {
-            var candidate: AXObserver?
-            let callback: AXObserverCallback = { _, _, _, context in
-                guard let context = context else { return }
-                MainActor.assumeIsolated { Unmanaged<FocusGuard>.fromOpaque(context).takeUnretainedValue().sawTransition = true }
-            }
-            if AXObserverCreate(pid,callback,&candidate) == .success, let candidate = candidate {
-                observer = candidate
-                let root = AXUIElementCreateApplication(pid)
-                for name in [kAXFocusedWindowChangedNotification,kAXFocusedUIElementChangedNotification] {
-                    AXObserverAddNotification(candidate,root,name as CFString,Unmanaged.passUnretained(self).toOpaque())
-                }
-                CFRunLoopAddSource(CFRunLoopGetMain(),AXObserverGetRunLoopSource(candidate),.commonModes)
+    // A real click, or a modifier just pressed or released (Cmd-Tab, Dock, Spotlight),
+    // means the person switched apps themselves.
+    // A key press counts only when some app other than the action's target came forward
+    // (a launcher or shortcut), since typing elsewhere says nothing about the target.
+    private func userInitiated(_ activated: pid_t? = nil) -> Bool {
+        func age(_ events: [CGEventType]) -> Double {
+            events.map { CGEventSource.secondsSinceLastEventType(.hidSystemState,eventType:$0) }.filter { $0.isFinite && $0 >= 0 }.min() ?? .infinity
+        }
+        if age([.leftMouseDown,.leftMouseUp,.rightMouseDown,.otherMouseDown]) < 0.5 || age([.flagsChanged]) < 0.4
+            || CGEventSource.flagsState(.hidSystemState).contains(.maskCommand) { return true }
+        if let activated, activated != target { return age([.keyDown]) < 0.5 }
+        return false
+    }
+    private func activated(_ app: NSRunningApplication) {
+        guard Date() < watchUntil, let previous, !previous.isTerminated,
+              app.processIdentifier != previous.processIdentifier, app.processIdentifier != getpid() else { return }
+        if userInitiated(app.processIdentifier) { watchUntil = .distantPast; return }
+        changed = true
+        restored = true; restorations += 1
+        previous.activate(options:[])
+        let pid = previous.processIdentifier
+        DispatchQueue.main.asyncAfter(deadline:.now()+0.15) {
+            MainActor.assumeIsolated {
+                guard NSWorkspace.shared.frontmostApplication?.processIdentifier != pid, !self.userInitiated() else { return }
+                AXUIElementSetAttributeValue(AXUIElementCreateApplication(pid),kAXFrontmostAttribute as CFString,kCFBooleanTrue)
             }
         }
-        return state
     }
-    func finish() -> (FocusState,Bool) {
-        let after = FocusState.capture()
-        let changed = sawTransition || before.map { $0.differs(from:after) } == true
-        cancel()
-        if changed { blocked = true }
-        return (after,changed)
+    func expect(_ pid: pid_t) { target = pid }
+    func begin(target pid: pid_t?) -> FocusState {
+        previous = NSWorkspace.shared.frontmostApplication
+        target = pid
+        changed = false; restored = false
+        watchUntil = Date().addingTimeInterval(30)
+        return FocusState.capture()
     }
-    func requireAvailable() throws {
-        guard !blocked else { try fail("FOCUS_PROTECTION_BLOCKED", "This session is paused after a focus change. Inspect the app and reconnect to continue; no focus restoration is attempted.") }
-    }
-    func cancel() {
-        if let observer { CFRunLoopRemoveSource(CFRunLoopGetMain(),AXObserverGetRunLoopSource(observer),.commonModes) }
-        observer = nil; before = nil
+    func cancel() { watchUntil = .distantPast }
+    func finish(settleMs: Int) async -> (after: String, changed: Bool, restored: Bool) {
+        if settleMs > 0 { try? await Task.sleep(nanoseconds:UInt64(settleMs)*1_000_000) }
+        // The notification can trail the switch; treat a different foreground app the same way.
+        if !changed, let current = NSWorkspace.shared.frontmostApplication { activated(current) }
+        if restored, let previous {
+            for _ in 0..<12 where NSWorkspace.shared.frontmostApplication?.processIdentifier != previous.processIdentifier {
+                try? await Task.sleep(nanoseconds:25_000_000)
+            }
+        }
+        // Late self-activations are still undone for a short while after the action returns.
+        watchUntil = Date().addingTimeInterval(1.5)
+        return (frontmost(),changed,restored)
     }
 }

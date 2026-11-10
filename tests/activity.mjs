@@ -37,7 +37,7 @@ try{
   check(pair.x.activity.stackRow!==pair.y.activity.stackRow,'concurrent pills occupy different rows');
   const one=pair.x.activity.pillFrame,two=pair.y.activity.pillFrame;
   check(one.y+one.height<=two.y || two.y+two.height<=one.y,'concurrent panels do not overlap');
-  await assert.rejects(app.pressKey(tree.nodes.find(n=>n.identifier==='benchmark-input').id,'Tab'),{code:'FOCUS_UNSAFE'});checks++;
+  await assert.rejects(app.performSecondaryAction(tree.nodes.find(n=>n.identifier==='benchmark-input').id,'AXShowMenu'),{code:'FOCUS_UNSAFE'});checks++;
   tree=await app.getAXState();
   await app.setValue(tree.nodes.find(n=>n.identifier==='benchmark-input').id,'FOCUS-PROTECTED');
   check((await app.getAXState()).nodes.find(n=>n.identifier==='benchmark-input').value==='FOCUS-PROTECTED','semantic text edits still work');

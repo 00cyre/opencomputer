@@ -21,9 +21,9 @@ Run on an unlocked Mac with Accessibility and Screen Recording already approved.
 1. Verify the fixture exists and Accessibility is available.
 2. Reject an app outside the allowlist.
 3. Read a writable text control and replace its value in the background.
-4. Reject reuse of the consumed snapshot.
-5. Read back the changed value.
-6. Click a checkbox and submit button.
+4. Insert text at the caret, then send Return and typed keys to the background field, all from one snapshot.
+5. Reject an unknown snapshot and a window-raising action; read back the changed value.
+6. Click a checkbox, then press the submit button through a screenshot point.
 7. Verify the fixture's independent on-disk state: expected token, checkbox on, exactly one submit.
 8. Check foreground focus during actions and submission.
 9. Select the fixture's actual window and validate its captured PNG signature.
@@ -42,10 +42,10 @@ npm run test:motion
 npm run test:interaction
 ```
 
-- Activity: 16 assertions across two real helper sessions, correct Claude/Grok attribution, visible ghost cursor, hiding behind a covering window and returning, stacked non-overlapping pills, click-through/non-activating flags, raw-key rejection, semantic editing, and independent release.
+- Activity: 16 assertions across two real helper sessions, correct Claude/Grok attribution, visible ghost cursor, hiding behind a covering window and returning, stacked non-overlapping pills, click-through/non-activating flags, menu-action rejection, semantic editing, and independent release.
 - UI: 12 assertions using the actual AppKit panel, comparing rendered dot frames, expanded content and window title, hover expansion/collapse, click-through behavior, non-key/main status, foreground isolation, and cleanup. Pointer positions are injected into the production hover calculation; the real mouse never moves. It captures only its own panels to PNG, not the desktop. This is a programmatic hover test, not a hardware-mouse walkthrough.
-- Focus and interaction: a test-only button deliberately activates the fixture. The helper returns `FOCUS_CHANGED`, retains the pause across observations, rejects further writes, and does not clear the block on `release`. A fresh connection then rejects editing the focused field with `USER_BUSY`, returns no-dispatch/retry metadata, and displays the waiting pill. It can edit another window of the same app while preserving the foreground editor. This also exercises explicit all-app access, window selection, subtree expansion, and preflight checks through the production helper. This validates containment after a change, not prevention of every app-side activation.
-- Interaction policy: 21 deterministic scenarios covering held mouse gestures and keys, focused editors, pointer proximity, recent typing/clicking/scrolling/movement, missing state, unrelated windows, quiet-time boundaries, and resumption after a gesture ends. These simulate signals without injecting global input.
+- Focus and interaction: a test-only button deliberately activates the fixture. The helper reports `focusChanged` and `focusRestored`, the previous foreground app is back in front, and the same session and snapshot keep working. It then edits a second window of the same app, exercising window selection, subtree expansion that keeps element IDs, and preflight checks through the production helper. This validates restoration after a change, not prevention of every app-side activation.
+- Interaction policy: 26 deterministic scenarios covering held mouse gestures and keys, focused editors, pointer proximity, recent typing/clicking/scrolling/movement, missing state, unrelated windows, quiet-time boundaries, and resumption after a gesture ends. These simulate signals without injecting global input.
 
 Nine deterministic native motion checks cover smooth interpolation, no overshoot, bounded idle drift, continuity when retargeting during idle, and stable animation under repeated target refresh. The UI test selects its own fixture PID and clears stale readiness state before launching.
 
@@ -63,7 +63,7 @@ Record app version and macOS version for each result:
 
 - [ ] Standard AppKit app: set a disposable field, press a button, verify values, and check focus.
 - [ ] Electron app: inspect tree quality and confirm semantic controls exist before mutation.
-- [ ] Selected-range text: replace Unicode text through `typeText` in supported controls and verify caret/foreground behavior. Raw keyboard input is intentionally rejected.
+- [ ] Selected-range text: replace Unicode text through `typeText` in supported controls and verify caret/foreground behavior. Check `keys: true` and `pressKey` against a background window of the same app.
 - [ ] Scrolling: call a supported accessibility scroll action and verify content changed.
 - [ ] Screen capture: select among multiple windows, test a covered window, and confirm no unrelated app content appears.
 - [ ] Secure field: value is redacted, `settable` false, mutation rejected. Screenshots are not redacted.

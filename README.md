@@ -11,7 +11,7 @@
 <img src="https://img.shields.io/badge/Node-22%2B-334b35" alt="Node 22 or later">
 </p>
 
-**OpenComputer gives AI agents a local interface for working with Mac apps in the background.** Discover apps, read their accessibility trees, change controls, and capture a specific window. Connect it to an MCP client or use the JavaScript API directly. No OpenComputer account, API key, cloud service, or npm dependencies.
+**OpenComputer gives AI agents a local interface for working with Mac apps in the background.** Open and discover apps, read them as a compact outline, click, type, press keys, scroll, and capture a window — all without moving your pointer, taking keyboard focus, or bringing an app forward. Connect it to an MCP client or use the JavaScript API directly. No OpenComputer account, API key, cloud service, or npm dependencies.
 
 ## Watch it work
 
@@ -29,10 +29,10 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 
 | For your agent | For your desktop |
 | :--- | :--- |
-| Eleven MCP tools with explicit input schemas. | Exact app allowlists, or explicit all-app access on your own Mac. |
-| Structured accessibility snapshots with element IDs. | Semantic actions do not deliberately activate apps or move the global pointer. |
+| Fourteen MCP tools with explicit input schemas. | Exact app allowlists, or explicit all-app access on your own Mac. |
+| Compact outlines with element IDs that stay valid across actions. | Clicks are accessibility presses; keys go to the target process only. Your pointer never moves. |
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
-| Native actions with verification metadata. | Focus changes pause further writes; raw keyboard injection is disabled. |
+| Native actions with verification metadata. | An app that brings itself forward is sent back; your foreground app is restored. |
 | Agent identity and current action. | Three animated dots expand on hover; a ghost cursor marks the visible target. |
 
 ## Get started
@@ -71,7 +71,7 @@ The colored ghost cursor eases between targets and gently floats while idle. It 
 
 ## Work alongside your agent
 
-Before each action, OpenComputer checks the target window against your current editing, held mouse gestures and keys, recent input, and pointer proximity. It waits when an action would conflict, with an amber indicator explaining why. It can continue in unrelated background windows, even another window of the same app. Nothing is queued for surprise replay. [Signals, thresholds, and limits](docs/API.md#focus-protection-and-text).
+Whatever you do in other apps never blocks the agent. Only work in the same window does: an action then waits a couple of seconds for you to pause, with an amber indicator explaining why, and otherwise returns `USER_BUSY` with nothing sent. If an app brings itself forward when the agent presses something, OpenComputer hands the foreground back to the app you were in. [Signals, thresholds, and limits](docs/API.md#staying-out-of-the-persons-way).
 
 ## A familiar interface
 
@@ -91,17 +91,19 @@ try {
 }
 ```
 
-Snapshots expire after 60 seconds and are consumed by actions. Stale IDs fail with a clear error. Screenshots can return a window-selection list; select the intended window and request it again. [Full API](docs/API.md).
+Element IDs stay valid across actions until the next full observe of that app; one observe can drive a multi-step task. Stale IDs fail with a clear error. Screenshots can return a window-selection list; select the intended window and request it again. [Full API](docs/API.md).
 
 ## What works today
 
-- **Background semantic control:** reading accessibility trees, `AXPress`, writable values, and supported secondary actions.
+- **Background control:** pointer-free clicks on elements or screenshot points, writable values, secondary actions, and opening apps or URLs without activating them.
 - **Window capture:** ScreenCaptureKit captures a selected window without capturing the whole desktop.
 - **Agent connections:** local MCP over stdio, plus a JavaScript client with serialized requests and bounded timeouts.
-- **Text and scrolling:** semantic value/selection replacement and accessibility page scrolling, where supported. Raw keyboard injection is disabled.
-- **Activity and focus protection:** hover-to-expand dots, visible-target ghost cursor, window-aware interaction checks, and a session pause after detected focus changes.
+- **Text, keys, and scrolling:** insertion at the caret, typed text and shortcuts delivered to the target process only, and page scrolling.
+- **Fast reads:** batched attribute reads return a typical thousand-element window in well under a second, as a compact outline with `query` search.
+- **Activity and focus protection:** hover-to-expand dots, visible-target ghost cursor, window-aware interaction checks, and foreground restoration when an app activates itself.
+- **Any agent:** each MCP client runs its own server, so several agents can work at once.
 
-**Not implemented:** arbitrary coordinate clicks/dragging, browser DOM automation, Windows/Linux, launching apps, and locked-screen operation. Canvas-only controls, minimized windows, secure fields, and apps with incomplete accessibility support may not work. OpenComputer never activates an app, sets keyboard focus, or restores the foreground window. An app can still activate itself in response to a semantic action; public macOS APIs cannot prevent every such transition. A detected change returns `FOCUS_CHANGED` and blocks further writes until reconnect. [Compatibility and acceptance checks](docs/TESTING.md).
+**Not implemented:** hover, drag, right-click, pixel-exact clicks on canvases, browser DOM automation, Windows/Linux, and locked-screen operation. Canvas-only controls, minimized windows, secure fields, and apps with incomplete accessibility support may not work. Keys reach the target app's own focused control, and some apps ignore keys while in the background. An app can still bring itself forward for a moment before the foreground is handed back; public macOS APIs cannot prevent that. Each agent host needs its own Accessibility and Screen Recording approval. [Compatibility and acceptance checks](docs/TESTING.md).
 
 ## Quietly local
 
@@ -123,7 +125,7 @@ npm run fixture:build      # disposable native benchmark app
 npm run test:integration   # real accessibility actions + window screenshot
 npm run test:activity      # two agents, visibility, cleanup
 npm run test:ui            # animated dots, hover, actual panel screenshots
-npm run test:focus         # focus containment + two-window interaction protection
+npm run test:focus         # foreground restoration + two-window work
 npm run test:interaction   # deterministic activity-conflict scenarios
 ```
 

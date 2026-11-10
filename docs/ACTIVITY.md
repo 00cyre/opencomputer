@@ -30,6 +30,6 @@ Both panels use non-activating AppKit windows, cannot become key/main, ignore mo
 
 MCP client identity is detected during initialization. To override it, set `OPENCOMPUTER_AGENT=Claude` or another display name in the server’s environment. Set `OPENCOMPUTER_OVERLAY=0` to disable both visuals; focus protection remains enabled. JavaScript equivalents are `{agent: 'Claude', overlay: false}`. Restart the server after configuration changes.
 
-OpenComputer never activates or restores windows, sets keyboard focus, or injects raw keys. An app can activate itself in response to its accessibility action. Detected app/window/control focus changes pause subsequent mutations until reconnect; this cannot prevent every app’s first or delayed transition. See [API errors and recovery](API.md#focus-protection-and-text).
+OpenComputer never activates an app for its own work or moves the pointer. Keys are posted to the target process only. An app can activate itself in response to an action; when the person did not cause it, the helper hands the foreground back to the app they were in. This cannot prevent a brief flash forward. See [staying out of the way](API.md#staying-out-of-the-persons-way).
 
 For stacking, helpers exchange only PID, heartbeat time, and expanded/collapsed state in a per-user temporary directory. No app names, window titles, action text, or input values are written there. Clean release removes the session record; records left by forced termination are ignored after the process dies or heartbeat expires.
