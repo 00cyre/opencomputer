@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.1 — 2026-11-11
+
+Actions only ever land on the page they observed, and every session leaves a record.
+
+- **`TARGET_CHANGED`.** Element actions refuse when the element's window title, selected tab, or web page changed since the snapshot, or the element left its window (a background tab); `STALE_ELEMENT` when it no longer exists. Checked when the request arrives and again just before dispatch. `pressKey` without an element checks the app's focused window; `clickPoint` checks the screenshot's window title, size, and page. Changes the session caused itself keep the snapshot valid.
+- **Action log.** One JSON Lines file per helper in `~/Library/Logs/OpenComputer`: time, method, resolved element, app, window, tab, page (no query), and outcome, including refusals. Typed text and values are recorded as a length only. `status().actionLog` gives the path; `opencomputer log` merges all sessions.
+- Chrome for Testing is treated as a Chromium browser.
+- `npm run test:guard` exercises both with the fixture's new browser-like tabs.
+
 ## 0.4.0 — 2026-11-10
 
 Background control that works on real apps, without interrupting the person at the Mac.

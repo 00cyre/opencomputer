@@ -46,6 +46,37 @@ Attributes are read in one batched call per element, so a typical window of abou
 
 Element IDs stay valid across actions. A full or window observe of an app replaces that app's snapshot; `root` and `menu` observations extend the current one and keep existing IDs. Snapshots expire 5 minutes after their last use and are scoped to one process. A stale or foreign ID fails with `STALE_SNAPSHOT`.
 
+### Changed targets
+
+An element ID names an accessibility object, not a position, so an action always reaches the object observe saw. That object can still sit in a tab the person has since left, or on a page that has since changed. Observe records, for every element, the window it was in, that window's title and selected tab (`AXTabButton`), and the web page (`AXWebArea` and its `AXURL`) for web content. Every element action (`click`, `setValue`, `typeText`, `performAction`, `scroll`, `pressKey` with an element, and `root` observes) checks them twice: when the request arrives, and again right before dispatch, after any wait for the person to pause. It refuses with:
+
+| Code | `details.reason` | Meaning |
+| --- | --- | --- |
+| `STALE_ELEMENT` | | The element no longer exists (its view or page was replaced). |
+| `TARGET_CHANGED` | `window-title` | The window title differs from the snapshot's, which in a browser means another tab or page is showing. `details.was` and `details.now` give both. |
+| | `tab` | The tab that was selected in that window is no longer selected (catches tabs with identical titles). |
+| | `page-url`, `page-closed` | The element's web page navigated or went away. Addresses are reported without query or fragment. |
+| | `detached` | The element's page or view is no longer in its window, as happens to a background tab. |
+| | `window-closed` | The window closed. |
+| | `window-unknown` | `pressKey` without an element: keys would reach a focused window the latest snapshot did not read. |
+
+Both carry `details.dispatched: false`: nothing was sent. Observe again and use the new IDs. Changes the session causes itself (pressing a tab, a click that retitles the page, closing its own tab) update the snapshot, so later actions in that window keep working; old-page elements still fail the page and attachment checks. Changes made while the person was clicking, typing, or scrolling are never absorbed this way. `pressKey` without an element checks the app's focused window against the app's latest snapshot, when one exists.
+
+`clickPoint` resolves a pixel at dispatch time, so the screenshot records the window title, size, and the page at its centre. The point is refused with `TARGET_CHANGED` if the title or size changed, or the pixel now lands on another page; screenshots older than 5 minutes return `SCREENSHOT_REQUIRED`.
+
+A window whose title changes by itself (a ticking timer, an unread counter) makes actions in it fail more often; observe again just before acting.
+
+### Action log
+
+Every helper process writes one JSON Lines file, `~/Library/Logs/OpenComputer/session-<UTC start>-<helper pid>.jsonl` (`OPENCOMPUTER_LOG_DIR` moves it, `OPENCOMPUTER_LOG=0` turns it off). `status` returns its path as `actionLog`. The first line names the session: version, helper pid, the processes above it (`clients`), allowed apps, and agent. Then one line per `configure`, `release`, `open`, `observe`, `screenshot`, and action, written whatever the outcome:
+
+- `time` (UTC, milliseconds), `event` (the method), `app`, `pid`, `snapshot`, `element`, and non-sensitive arguments (`key`, `count`, `direction`, `pages`, `action`, `keys`, `x`, `y`, `waitMs`).
+- `target`: the resolved element's `role`, `subrole`, `label`, `identifier` (as observed, if it is gone); `pressed` when a container was pressed instead; `window` (current title), `tab` (the tab the snapshot saw selected), and `page` (address without query or fragment).
+- `outcome`: `dispatched`, `ok` (read-only), `refused` (nothing sent), or `failed` (sent, then errored), plus `error` with `code`, `message`, and the reason fields; for dispatched actions `delivery`, `confirmed`, `focusChanged`, `focusRestored`, `frontmostBefore`, `frontmostAfter`, and `elapsedMs`.
+
+Typed text and set values are never written, only `textLength` or `valueLength`; a bare one-character `key` is written as `[character]`. Observe lines carry window titles and a node count, never element values; screenshot lines never carry pixels. Files are created `0600` in a `0700` directory and deleted after 30 days. `opencomputer log [MINUTES] [--app BUNDLE] [--json]` merges every session's log in time order.
+
+
 Chromium and Electron apps build their accessibility tree on demand. The first observe switches it on (`webAccessibilityEnabled: true`); observe again if page content is missing.
 
 ## Acting without the pointer or the foreground
@@ -90,7 +121,7 @@ An action waits up to `waitMs` (default 2000, at most 10000; `OPENCOMPUTER_WAIT_
 
 Some apps bring themselves forward when a control is pressed. The helper watches for an activation the person did not cause — no click, modifier, or key from them — and hands the foreground back to the app they were in. The result then carries `focusChanged: true` and `focusRestored: true`, and the session stays usable. Late self-activations are undone for 1.5 s after the action returns. A switch the person makes themselves is left alone. This is correction after the fact: a self-activating app can flash forward for a moment, and public macOS APIs cannot prevent that.
 
-The check and the dispatch are not atomic, and input silence does not prove the person stopped reading. Browser tabs are part of their window; there is no per-tab ownership.
+The check and the dispatch are not atomic, and input silence does not prove the person stopped reading. Browser tabs are part of their window; there is no per-tab ownership, but an action never lands on a tab or page other than the one it observed (see [changed targets](#changed-targets)).
 
 ## Activity state
 
@@ -124,4 +155,4 @@ Every MCP client starts its own server and helper process, so any number of agen
 
 ## Native protocol
 
-The helper accepts newline-delimited JSON with `method` plus arguments and returns one `result` or `error` object per line. The JavaScript client is the supported integration boundary. The helper itself checks the allowlist, macOS permissions, process identity, secure fields, snapshot ownership, and expiry.
+The helper accepts newline-delimited JSON with `method` plus arguments and returns one `result` or `error` object per line. The JavaScript client is the supported integration boundary. The helper itself checks the allowlist, macOS permissions, process identity, secure fields, snapshot ownership, expiry, and the target's window, tab, and page, and writes the action log.

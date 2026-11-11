@@ -11,6 +11,13 @@ final class Snapshot {
     var elements: [AXUIElement] = []
     var index: [CFHashCode:[Int]] = [:]
     var time = Date()
+    // What observe saw around each element; TargetGuard checks it before every dispatch.
+    var parents: [Int:Int] = [:]
+    var places: [Int:Place] = [:]
+    var windows: [Int:WindowMark] = [:]
+    var pages: [Int:PageMark] = [:]
+    // Role and label as observed, for logging an element that has since gone away.
+    var described: [Int:[String:Any]] = [:]
     init(pid: pid_t, bundle: String) { self.pid = pid; self.bundle = bundle }
     func register(_ element: AXUIElement) -> Int {
         let hash = CFHash(element)
@@ -28,19 +35,22 @@ final class Computer {
     let focus = FocusGuard()
     let interaction = InteractionGuard()
     var snapshots: [pid_t:Snapshot] = [:]
-    var captures: [pid_t:(window: CGWindowID, scale: CGFloat)] = [:]
+    var captures: [pid_t:Capture] = [:]
     var webEnabled: Set<pid_t> = []
     let defaultWait: Int
+    let log = ActionLog(ProcessInfo.processInfo.environment)
     static let observed = [kAXRoleAttribute,kAXSubroleAttribute,kAXTitleAttribute,kAXDescriptionAttribute,kAXIdentifierAttribute,kAXValueAttribute,
                            kAXEnabledAttribute,kAXFocusedAttribute,kAXSelectedAttribute,kAXPlaceholderValueAttribute,kAXPositionAttribute,kAXSizeAttribute,kAXChildrenAttribute]
     static let textRoles = [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole,"AXSearchField"]
     // Chromium and Firefox build their web accessibility tree only when asked.
-    static let browsers = ["com.google.Chrome","com.brave.Browser","com.microsoft.edgemac","company.thebrowser.Browser","com.vivaldi.Vivaldi","com.operasoftware.Opera","org.chromium.Chromium","org.mozilla.firefox","ai.perplexity.comet","com.openai.atlas"]
+    static let browsers = ["com.google.Chrome","com.brave.Browser","com.microsoft.edgemac","company.thebrowser.Browser","com.vivaldi.Vivaldi","com.operasoftware.Opera","org.chromium.Chromium","com.google.chrome.for.testing","org.mozilla.firefox","ai.perplexity.comet","com.openai.atlas"]
     init() {
         let env = ProcessInfo.processInfo.environment
         allowed = Set((env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
+        log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
+    static let version = "0.4.1"
     func permit(_ request: [String: Any]) throws -> String {
         let bundle = try string(request, "app")
         guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
@@ -65,17 +75,20 @@ final class Computer {
     func trusted() throws {
         guard AXIsProcessTrusted() else { try fail("ACCESSIBILITY_REQUIRED", "Allow the launching host (Terminal, Claude, Grok, or OpenComputer helper) in System Settings > Privacy & Security > Accessibility, then restart it.") }
     }
-    func element(_ request: [String: Any], _ app: NSRunningApplication, key: String = "element") throws -> AXUIElement {
+    func resolve(_ request: [String: Any], _ app: NSRunningApplication, key: String = "element") throws -> (snapshot: Snapshot, index: Int, element: AXUIElement) {
         guard let snapshot = snapshots[app.processIdentifier], (request["snapshot"] as? String) == snapshot.id,
               Date().timeIntervalSince(snapshot.time) < 300, let index = request[key] as? Int, snapshot.elements.indices.contains(index) else {
             try fail("STALE_SNAPSHOT", "Observe the app again and use an element from that snapshot. A snapshot is replaced by the next full observe of the same app and expires after 5 minutes.")
         }
         let item = snapshot.elements[index]
+        if key == "element" { note?.merge(["target":isAlive(item) ? describeForLog(item) : snapshot.described[index] ?? [:]].merging(whereabouts(item,in:snapshot)) { a, _ in a }) }
+        try snapshot.verify(index)
         if attribute(item, kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole {
             try fail("SECURE_FIELD", "Secure text fields are excluded from automation.")
         }
-        return item
+        return (snapshot,index,item)
     }
+    func element(_ request: [String: Any], _ app: NSRunningApplication, key: String = "element") throws -> AXUIElement { try resolve(request,app,key:key).element }
     func label(_ element: AXUIElement) -> String {
         let names = [kAXTitleAttribute,kAXDescriptionAttribute].compactMap { attribute(element,$0) as? String }.filter { !$0.isEmpty }
         return cleanLabel(names.first ?? roleOf(element).replacingOccurrences(of:"AX",with:""),limit:45)
@@ -116,8 +129,12 @@ final class Computer {
         guard [request["root"] != nil, request["window"] != nil, menu].filter({ $0 }).count <= 1 else { try fail("INVALID_ARGUMENT","Use only one of window, root, or menu.") }
         var roots: [AXUIElement]
         var snapshot = snapshots[pid]
+        // A subtree expansion inherits the window and page its root was seen in.
+        var start = (parent: Int?.none, place: Place())
         if request["root"] != nil {
-            roots = [try element(request,app,key:"root")]
+            let root = try resolve(request,app,key:"root")
+            roots = [root.element]
+            start = (root.snapshot.parents[root.index],root.snapshot.places[root.index] ?? Place())
         } else if menu {
             guard let bar = axElement(attribute(applicationRoot,kAXMenuBarAttribute)) else { try fail("UNSUPPORTED_TARGET","This app does not expose a menu bar.") }
             roots = [bar]
@@ -140,7 +157,7 @@ final class Computer {
         var nodes: [[String: Any]] = []
         var seen: Set<Int> = []
         var truncated = false
-        func walk(_ element: AXUIElement, _ depth: Int, _ parent: Int?) {
+        func walk(_ element: AXUIElement, _ depth: Int, _ parent: Int?, _ inherited: Place) {
             guard nodes.count < limit, depth <= 60, Date() < deadline else { truncated = true; return }
             let index = current.register(element)
             guard seen.insert(index).inserted else { return }
@@ -148,6 +165,26 @@ final class Computer {
             let role = v[0] as? String ?? "AXUnknown"
             let subrole = v[1] as? String ?? ""
             let secure = subrole == kAXSecureTextFieldSubrole
+            var place = inherited
+            if role == kAXWindowRole {
+                place = Place(window:index,page:nil)
+                current.windows[index] = WindowMark(title:v[2] as? String ?? "")
+            } else if role == "AXWebArea" {
+                place.page = index
+                if let url = pageURL(element) { current.pages[index] = PageMark(url:url) }
+            } else if subrole == "AXTabButton", let w = place.window {
+                if current.windows[w]?.tabs.contains(index) == false { current.windows[w]?.tabs.append(index) }
+                if current.windows[w]?.tab == nil, (v[5] as? NSNumber)?.intValue == 1 || v[8] as? Bool == true {
+                    current.windows[w]?.tab = index
+                    current.windows[w]?.tabTitle = v[2] as? String ?? ""
+                }
+            }
+            current.note(index,parent:parent,place:place)
+            var seenAs: [String:Any] = ["role":role]
+            if !subrole.isEmpty { seenAs["subrole"] = subrole }
+            if let name = [v[2],v[3]].compactMap({ $0 as? String }).first(where: { !$0.isEmpty }) { seenAs["label"] = cleanLabel(name,limit:80) }
+            if let identifier = v[4] as? String, !identifier.isEmpty { seenAs["identifier"] = cleanLabel(identifier,limit:60) }
+            current.described[index] = seenAs
             var node: [String: Any] = ["id": index, "role": role, "depth": depth]
             if let parent = parent { node["parent"] = parent }
             if !subrole.isEmpty { node["subrole"] = subrole }
@@ -170,10 +207,10 @@ final class Computer {
             }
             nodes.append(node)
             if !secure {
-                for child in v[12] as? [AXUIElement] ?? [] { walk(child, depth + 1, index) }
+                for child in v[12] as? [AXUIElement] ?? [] { walk(child, depth + 1, index, place) }
             }
         }
-        for root in roots { walk(root, 0, nil) }
+        for root in roots { walk(root, 0, start.parent, start.place) }
         var result: [String:Any] = ["app": current.bundle, "pid": pid, "snapshot": current.id, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
             "elapsedMs": Int(Date().timeIntervalSince(started)*1000),
             "windows":windows.enumerated().map { index, window in ["index":index,"title":attribute(window,kAXTitleAttribute) as? String ?? "","minimized":attribute(window,kAXMinimizedAttribute) as? Bool ?? false,"main":main.map { CFEqual(window,$0) } ?? false] as [String:Any] }]
@@ -201,6 +238,7 @@ final class Computer {
             window = candidates[0]
         }
         overlay.track(app,title:window.title,captureWindowID:window.windowID,captureFrame:window.frame,action:"Capturing window")
+        note?.merge(["window":cleanLabel(window.title ?? "",limit:160)])
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
         let scale = min(1, 1600 / max(window.frame.width, window.frame.height))
@@ -210,7 +248,15 @@ final class Computer {
         let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
-        captures[app.processIdentifier] = (window.windowID,scale)
+        // The page at the window's centre identifies which tab the picture shows.
+        var capture = Capture(window:window.windowID,scale:scale,title:window.title,size:window.frame.size)
+        var hit: AXUIElement?
+        if AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(window.frame.midX),Float(window.frame.midY),&hit) == .success, let hit,
+           let frame = owningWindow(hit).flatMap({ elementFrame($0) }), abs(frame.minX-window.frame.minX) <= 3, abs(frame.minY-window.frame.minY) <= 3,
+           let page = webArea(hit) {
+            capture.page = page; capture.url = pageURL(page)
+        }
+        captures[app.processIdentifier] = capture
         return ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "scale": scale, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
     }
     // Screenshot pixel -> the element this app has there. The hit test is scoped to the
@@ -218,10 +264,7 @@ final class Computer {
     func hitTest(_ app: NSRunningApplication, _ request: [String:Any]) throws -> AXUIElement {
         guard let capture = captures[app.processIdentifier] else { try fail("SCREENSHOT_REQUIRED","Take a screenshot of this app first; clickPoint coordinates are pixels in the most recent screenshot.") }
         guard let x = (request["x"] as? NSNumber)?.doubleValue, let y = (request["y"] as? NSNumber)?.doubleValue else { try fail("INVALID_ARGUMENT","x and y must be numbers") }
-        guard let info = (CGWindowListCopyWindowInfo([.optionIncludingWindow],capture.window) as? [[String:Any]])?.first,
-              let raw = info[kCGWindowBounds as String] as? NSDictionary, let bounds = CGRect(dictionaryRepresentation:raw as CFDictionary) else {
-            try fail("NO_WINDOW","The captured window is gone. Take a new screenshot.")
-        }
+        let bounds = try capture.verify(hit:nil)
         let point = CGPoint(x:bounds.minX+x/capture.scale,y:bounds.minY+y/capture.scale)
         guard bounds.contains(point) else { try fail("INVALID_ARGUMENT","The point is outside the captured window.") }
         var hit: AXUIElement?
@@ -233,6 +276,7 @@ final class Computer {
             try fail("UNSUPPORTED_TARGET","Another window of this app covers that point. Observe the window and use an element instead.")
         }
         if attribute(hit,kAXSubroleAttribute) as? String == kAXSecureTextFieldSubrole { try fail("SECURE_FIELD","Secure text fields are excluded from automation.") }
+        _ = try capture.verify(hit:hit)
         return hit
     }
     // What "click" means for an element, without a pointer: press it or the control
@@ -316,11 +360,31 @@ final class Computer {
         } catch let error as Failure { focus.cancel(); throw error }
         catch { focus.cancel(); try fail("OPEN_FAILED","Could not open \(bundle): \(error.localizedDescription)") }
     }
+    // The request being handled; requests are serialized, so there is at most one.
+    var note: Note?
     func handle(_ request: [String: Any]) async throws -> [String: Any] {
+        let method = request["method"] as? String ?? ""
+        guard ActionLog.methods.contains(method) else { return try await dispatch(request) }
+        let note = Note(method,request)
+        self.note = note
+        defer { self.note = nil }
+        do {
+            let result = try await dispatch(request)
+            log.write(note.finish(result))
+            return result
+        } catch let error as Failure {
+            log.write(note.failed(error.code,error.message,error.details))
+            throw error
+        } catch {
+            log.write(note.failed("NATIVE_ERROR",error.localizedDescription,nil))
+            throw error
+        }
+    }
+    func dispatch(_ request: [String: Any]) async throws -> [String: Any] {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": "0.4.0", "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
@@ -342,9 +406,25 @@ final class Computer {
         try trusted()
         if method == "observe" { return try await observe(app,request) }
         let elementOptional = ["checkInteraction","pressKey","clickPoint"].contains(method)
-        var item: AXUIElement? = method == "clickPoint" ? try hitTest(app,request)
-            : (!elementOptional || request["element"] != nil) ? try element(request,app) : nil
+        var resolved: (snapshot: Snapshot, index: Int, element: AXUIElement)?
+        var item: AXUIElement?
+        if method == "clickPoint" {
+            let hit = try hitTest(app,request)
+            item = hit
+            note?.merge(["target":describeForLog(hit)].merging(whereabouts(hit,in:snapshots[pid])) { a, _ in a })
+        } else if !elementOptional || request["element"] != nil {
+            resolved = try resolve(request,app)
+            item = resolved!.element
+        }
         if method == "checkInteraction" { return interaction.assess(app,element:item,intrusive:request["intrusive"] as? Bool ?? false).json }
+        // Keys without an element go to the app's focused window; the latest snapshot of
+        // the app must have read that window as it still is.
+        var keySnapshot: Snapshot?
+        if method == "pressKey", item == nil {
+            if let focused = axElement(attribute(AXUIElementCreateApplication(pid),kAXFocusedWindowAttribute)) { note?.merge(["window":cleanLabel(readTitle(focused).title,limit:160)]) }
+            if let snapshot = snapshots[pid], Date().timeIntervalSince(snapshot.time) < 300 { keySnapshot = snapshot }
+            try keySnapshot?.verifyFocusedWindow(pid)
+        }
         // Everything that can be refused is decided before the person's activity is checked.
         var intrusive = false
         var settle = 15
@@ -458,10 +538,28 @@ final class Computer {
             throw Failure(code:"USER_BUSY",message:decision.message + " Nothing was dispatched or queued. Retry after retryAfterMs; the snapshot is still valid.",details:details)
         }
         if wait > 0 { overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))") }
+        // The person may have switched tabs or pages while the action waited for a pause.
+        do {
+            if let resolved { try resolved.snapshot.verify(resolved.index) }
+            else if method == "clickPoint", let capture = captures[pid] { _ = try capture.verify(hit:item) }
+            else if let keySnapshot { try keySnapshot.verifyFocusedWindow(pid) }
+        } catch { focus.cancel(); overlay.markWaiting("Target changed; observe again"); throw error }
+        note?.merge(["dispatchAttempted":true])
+        let dispatched = Date()
         var dispatchError: Error?
         do { info.merge(try await run()) { _, new in new } } catch { dispatchError = error }
         let outcome = await focus.finish(settleMs:settle)
         if let error = dispatchError { throw error }
+        // Changes this action caused keep the snapshot valid; changes the person made do not.
+        if !userActed(since:dispatched) {
+            if let resolved { resolved.snapshot.refresh(resolved.index) }
+            else if let keySnapshot { keySnapshot.refreshFocusedWindow(pid) }
+            else if method == "clickPoint", var capture = captures[pid] {
+                if let title = windowInfo(capture.window)?.title { capture.title = title }
+                if let page = capture.page, let url = pageURL(page) { capture.url = url }
+                captures[pid] = capture
+            }
+        }
         var result: [String:Any] = ["dispatched":true,"method":method,"frontmostBefore":before.bundle,"frontmostAfter":outcome.after,"focusChanged":outcome.changed,"focusRestored":outcome.restored,"verificationRequired":true,"activity":overlay.state()]
         result.merge(info) { _, new in new }
         return result

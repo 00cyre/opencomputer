@@ -30,6 +30,16 @@ Run on an unlocked Mac with Accessibility and Screen Recording already approved.
 
 The script reports 13 assertions. Screenshots are kept only if `OPENCOMPUTER_TEST_IMAGE` names an output path. The fixture's own result file is outside the agent's task and is deleted after the integration test.
 
+## Changed targets and the action log
+
+```sh
+npm run test:guard
+```
+
+Launches the fixture with two browser-like tabs whose window title follows the selected tab. A signal to the fixture plays the person switching tabs, outside OpenComputer. 26 assertions: a control in the tab the person left, a window control, keys to the focused window, a same-title tab switch, and a screenshot point are all refused with nothing reaching the fixture; a fresh snapshot acts; the agent's own tab press keeps the snapshot valid for window controls but not for the tab it left; the foreground is unchanged; and the session log names targets, windows, and outcomes while containing no typed values.
+
+A manual run against a throwaway Chrome for Testing window (separate app and profile) on 2026-11-11 passed 20 checks: page buttons, the address bar, and bare `Return` refused after a tab switch (`window-title`), the same between two tabs titled identically (`tab`), the old page refused after the agent's own tab switch (`detached`) and after the person navigated (`STALE_ELEMENT`), `clickPoint` refused after a tab switch, and closing the agent's own tab then reselecting the person's tab from one snapshot allowed.
+
 ## Activity and focus tests
 
 Run these serially after building the fixture:

@@ -1,6 +1,6 @@
 import AppKit
 
-final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
+final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTabViewDelegate {
     var window: NSWindow!
     let field = NSTextField(string: "")
     let status = NSTextField(labelWithString: "Waiting for submission")
@@ -10,6 +10,12 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
     var returns = 0
     var cover: NSWindow?
     var otherWindow: NSWindow?
+    // Browser-like tabs: the window title follows the selected tab. SIGUSR1 switches tabs
+    // the way a person would; SIGUSR2 switches without changing the title.
+    var tabs: NSTabView?
+    var retitle = true
+    var presses: [String:Int] = [:]
+    var signals: [DispatchSourceSignal] = []
     func applicationDidFinishLaunching(_ notification: Notification) {
         window = NSWindow(contentRect:NSRect(x:80,y:80,width:520,height:300), styleMask:[.titled,.closable,.miniaturizable], backing:.buffered, defer:false)
         window.title = "OpenComputer Test Fixture"
@@ -63,8 +69,46 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
             other.contentView!.addSubview(otherField)
             other.orderFrontRegardless(); otherWindow = other
         }
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_TABS"] == "1" {
+            window.setContentSize(NSSize(width:520,height:520))
+            let tabView = NSTabView(frame:NSRect(x:20,y:300,width:480,height:200))
+            for name in ["Alpha","Beta"] {
+                let item = NSTabViewItem(identifier:name)
+                item.label = name
+                let view = NSView(frame:NSRect(x:0,y:0,width:460,height:150))
+                let button = NSButton(title:"\(name) action",target:self,action:#selector(tabAction(_:)))
+                button.frame = NSRect(x:20,y:60,width:200,height:34)
+                button.setAccessibilityIdentifier("\(name.lowercased())-action")
+                view.addSubview(button)
+                item.view = view
+                tabView.addTabViewItem(item)
+            }
+            tabView.delegate = self
+            window.contentView!.addSubview(tabView)
+            tabs = tabView
+            window.title = "Fixture: Alpha"
+            for (number,rename) in [(SIGUSR1,true),(SIGUSR2,false)] {
+                signal(number,SIG_IGN)
+                let source = DispatchSource.makeSignalSource(signal:number,queue:.main)
+                source.setEventHandler { [weak self] in self?.switchTab(rename:rename) }
+                source.resume(); signals.append(source)
+            }
+        }
         window.orderFrontRegardless()
         save()
+    }
+    func switchTab(rename: Bool) {
+        guard let tabs else { return }
+        retitle = rename
+        tabs.selectTabViewItem(at:tabs.indexOfTabViewItem(tabs.selectedTabViewItem!) == 0 ? 1 : 0)
+        retitle = true
+    }
+    func tabView(_ tabView: NSTabView, didSelect item: NSTabViewItem?) {
+        if retitle, let label = item?.label { window.title = "Fixture: \(label)" }
+        save()
+    }
+    @objc func tabAction(_ sender: NSButton) {
+        presses[sender.title, default:0] += 1; save()
     }
     @objc func coverGhost() {
         let panel = NSPanel(contentRect:window.frame,styleMask:[.borderless,.nonactivatingPanel],backing:.buffered,defer:false)
@@ -93,7 +137,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate {
         save()
     }
     func save() {
-        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
+        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"presses":presses,"tab":tabs?.selectedTabViewItem?.label ?? "","title":window?.title ?? "","frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
         if let data = try? JSONSerialization.data(withJSONObject:state, options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:URL(fileURLWithPath:output), options:.atomic) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication) -> Bool { true }
