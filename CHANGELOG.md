@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.4.3 — 2026-11-12
+
+The MCP server survives helper timeouts and picks up rebuilt helpers.
+
+- **`ReconnectingComputer`.** `opencomputer serve` starts a new helper on the next request after a `TIMEOUT` or a helper exit, instead of answering `CLOSED` until the client restarts. It also moves to a rebuilt helper binary between requests. Either way snapshots are lost, so the agent sees `STALE_SNAPSHOT` and observes again.
+
 ## 0.4.2 — 2026-11-12
 
 Screenshots stop hanging, and lists that hide their rows become readable.

@@ -1,12 +1,12 @@
 #!/usr/bin/env node
 import {createInterface} from 'node:readline';
-import {createComputer} from '../src/computer.mjs';
+import {createComputer, ReconnectingComputer} from '../src/computer.mjs';
 import {handle} from '../src/protocol.mjs';
 import {readLog, formatEntry, logDir} from '../src/log.mjs';
 
 const command = process.argv[2] ?? 'serve';
 if (['--help','-h','help'].includes(command)) {
-  console.log('OpenComputer 0.4.2\n\nopencomputer serve    Local stdio MCP server\nopencomputer doctor   Check native permissions\nopencomputer apps     List running apps\nopencomputer call METHOD JSON   One request (read-only methods recommended)\nopencomputer log [MINUTES] [--app BUNDLE] [--json]   Actions of every session in the last MINUTES (default 60)\n\nSet OPENCOMPUTER_APPS to comma-separated exact bundle IDs, or * to explicitly enable all apps. No apps allowed by default.\nBuild first: npm run build. Requires macOS 14+ and Node 22+.');
+  console.log('OpenComputer 0.4.3\n\nopencomputer serve    Local stdio MCP server\nopencomputer doctor   Check native permissions\nopencomputer apps     List running apps\nopencomputer call METHOD JSON   One request (read-only methods recommended)\nopencomputer log [MINUTES] [--app BUNDLE] [--json]   Actions of every session in the last MINUTES (default 60)\n\nSet OPENCOMPUTER_APPS to comma-separated exact bundle IDs, or * to explicitly enable all apps. No apps allowed by default.\nBuild first: npm run build. Requires macOS 14+ and Node 22+.');
   process.exit(0);
 }
 // Reading the action logs needs no helper and no permissions.
@@ -19,7 +19,9 @@ if (command === 'log') {
   if (!entries.length) console.error(`No OpenComputer actions in the last ${minutes} minutes in ${logDir()}.`);
   process.exit(0);
 }
-const computer = createComputer({agent:process.env.OPENCOMPUTER_AGENT, overlay:process.env.OPENCOMPUTER_OVERLAY !== "0", apps:(process.env.OPENCOMPUTER_APPS ?? '').split(',').map(x=>x.trim()).filter(Boolean)});
+const options = {agent:process.env.OPENCOMPUTER_AGENT, overlay:process.env.OPENCOMPUTER_OVERLAY !== "0", apps:(process.env.OPENCOMPUTER_APPS ?? '').split(',').map(x=>x.trim()).filter(Boolean)};
+// The MCP server outlives helper timeouts and helper rebuilds; one-shot commands do not need to.
+const computer = command === 'serve' ? new ReconnectingComputer(options) : createComputer(options);
 for (const signal of ['SIGINT','SIGTERM']) process.on(signal, () => {computer.close(); process.exit(0);});
 try {
   if (command === 'doctor' || command === 'apps') console.log(JSON.stringify(await computer.request(command === 'doctor' ? 'status' : 'apps'), null, 2));

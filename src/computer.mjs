@@ -34,7 +34,7 @@ export class ComputerError extends Error {
 
 /** One connection owns one native process, which keeps one accessibility snapshot per app. */
 export class Computer {
-  #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent;
+  #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent; #clientName;
   constructor({apps = [], agent, overlay = true, executable = process.env.OPENCOMPUTER_NATIVE || fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
     if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || (x !== '*' && !/^[a-zA-Z0-9._-]+$/.test(x)))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps');
     if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
@@ -64,6 +64,8 @@ export class Computer {
     this.#child.on('exit', () => died(new ComputerError('HELPER_EXITED', 'Native helper exited. Create a new Computer connection.')));
     this.#child.stdin.on('error', error => died(error));
   }
+  get closed() { return this.#closed; }
+  get clientName() { return this.#clientName; }
   request(method, args = {}) {
     const run = () => new Promise((resolve, reject) => {
       if (this.#closed) return reject(new ComputerError('CLOSED', 'Computer connection is closed'));
@@ -82,6 +84,7 @@ export class Computer {
     return result;
   }
   setClientInfo(name) {
+    this.#clientName = name;
     if (this.#explicitAgent !== undefined) return Promise.resolve();
     return this.request("configure", {agent: String(name ?? "Agent").slice(0, 100)});
   }
@@ -136,3 +139,40 @@ class App {
   scroll(element, direction, pages, options) { return this.#action('scroll', element, {direction, pages, ...options}); }
 }
 export function createComputer(options) { return new Computer(options); }
+
+/**
+ * A long-lived connection for servers: after a timeout or a helper exit it starts a new
+ * helper on the next request, and it moves to a rebuilt helper binary between requests.
+ * Either way snapshots are lost, so the agent sees STALE_SNAPSHOT and observes again.
+ */
+export class ReconnectingComputer {
+  #options; #current; #stamp; #queue = Promise.resolve();
+  constructor(options = {}) { this.#options = options; this.#start(); }
+  #binary() { return this.#options.executable || process.env.OPENCOMPUTER_NATIVE || fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)); }
+  #stampNow() { try { const s = statSync(this.#binary()); return `${s.size}-${s.mtimeMs}`; } catch { return undefined; } }
+  #start() {
+    const name = this.#current?.clientName;
+    this.#current = new Computer(this.#options);
+    this.#stamp = this.#stampNow();
+    return name === undefined ? Promise.resolve() : this.#current.setClientInfo(name);
+  }
+  get restarts() { return this.#restarts; }
+  #restarts = 0;
+  async #ensure() {
+    const stale = this.#current.closed || (this.#stamp !== undefined && this.#stampNow() !== undefined && this.#stampNow() !== this.#stamp);
+    if (!stale) return;
+    this.#current.close();
+    this.#restarts++;
+    await this.#start();
+  }
+  request(method, args = {}) {
+    const run = async () => { await this.#ensure(); return this.#current.request(method, args); };
+    const result = this.#queue.then(run);
+    this.#queue = result.catch(() => {});
+    return result;
+  }
+  setClientInfo(name) { return this.#queue = this.#queue.then(() => this.#current.setClientInfo(name)).catch(() => {}); }
+  getState() { return this.request('apps'); }
+  close() { this.#current.close(); }
+  [Symbol.dispose]() { this.close(); }
+}

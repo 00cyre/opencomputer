@@ -91,3 +91,13 @@ test('a helper inside a TCC-protected folder is staged under Application Support
     assert.equal(stageExecutable(outside,home),outside);
   } finally { await rm(home,{recursive:true,force:true}); }
 });
+test('the server connection starts a new helper after a timeout', async()=>{
+  const {ReconnectingComputer} = await import('../src/computer.mjs');
+  const c = new ReconnectingComputer({executable,apps:['cc.test'],timeoutMs:200});
+  try {
+    await assert.rejects(c.request('hang'),{code:'TIMEOUT'});
+    const r = await c.request('status');
+    assert.equal(r.method,'status');
+    assert.equal(c.restarts,1);
+  } finally { c.close(); }
+});
