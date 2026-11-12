@@ -59,3 +59,28 @@ func captureDeadline<T>(seconds: Double = 12, _ operation: @escaping () async th
         }
     }
 }
+
+// Open and save panels (and other AppKit view services) run in an XPC process of their
+// own; the host app's accessibility tree shows them, but keys and hit tests stop at the
+// host. viewService finds that process for a window, so input can follow the panel.
+func executablePath(_ pid: pid_t) -> String? {
+    var buffer = [CChar](repeating:0,count:4096)
+    let length = proc_pidpath(pid,&buffer,UInt32(buffer.count))
+    return length > 0 ? String(cString:buffer) : nil
+}
+func isViewService(_ pid: pid_t) -> Bool {
+    guard let path = executablePath(pid) else { return false }
+    return path.hasPrefix("/System/") && path.contains(".xpc/Contents/MacOS/") && path.contains("Service")
+}
+func viewService(in window: AXUIElement, host: pid_t) -> pid_t? {
+    var queue = [(window,0)]
+    var visited = 0
+    while !queue.isEmpty, visited < 400 {
+        let (element,depth) = queue.removeFirst()
+        visited += 1
+        var pid: pid_t = 0
+        if AXUIElementGetPid(element,&pid) == .success, pid != host, pid > 0, isViewService(pid) { return pid }
+        if depth < 4 { for child in attribute(element,kAXChildrenAttribute) as? [AXUIElement] ?? [] { queue.append((child,depth+1)) } }
+    }
+    return nil
+}

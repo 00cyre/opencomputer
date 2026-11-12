@@ -42,7 +42,7 @@ test('MCP identity reaches the native presentation and the tool set covers backg
   assert.deepEqual(names,['claude-code']);
   for (const name of ['release','open','clickPoint','pressKey','typeText','scroll']) assert.ok(tools.some(t=>t.name===name),name);
   const actions=tools.find(t=>t.name==='performAction').inputSchema.properties.action.enum;
-  assert.deepEqual(actions,['AXPress','AXIncrement','AXDecrement','AXPick','AXConfirm','AXCancel','AXScrollToVisible']);
+  assert.deepEqual(actions,['AXPress','AXIncrement','AXDecrement','AXPick','AXConfirm','AXCancel','AXScrollToVisible','AXOpen']);
   // Actions that raise a window or open a menu under the pointer stay out of the schema.
   assert.ok(!actions.includes('AXRaise')&&!actions.includes('AXShowMenu'));
   assert.ok(tools.find(t=>t.name==='click').inputSchema.properties.waitMs);

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.4.4 — 2026-11-12
+
+Open and save panels on big folders, and steadier window choice.
+
+- **Long lists are read last.** A list, table, outline, browser, or grid with more than 60 children is walked after the rest of the window, so a file panel on a big folder (641 items in Downloads) still returns its OK, Cancel, and Where controls before the time budget runs out. `observe` takes `budgetMs` (1000–15000, default 4000).
+- **`clickPoint` inside open and save panels.** The host app's hit test stops at the panel's container; OpenComputer now descends the bridged tree to the smallest element under the point, so a pixel on Cancel presses Cancel.
+- **`windowTitle`** picks the window whose title equals, or else contains, the text, so a transient untitled window no longer shifts the window you meant.
+- **`AXOpen`** joins the actions `performAction` accepts, for rows and file-name fields that list it.
+
+Not fixed: keys still do not reach an open panel of a background app (neither the host nor the panel's own service accepts them), and screenshots of a Chrome sheet were not reproduced here.
+
 ## 0.4.3 — 2026-11-12
 
 The MCP server survives helper timeouts and picks up rebuilt helpers.

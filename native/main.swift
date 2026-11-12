@@ -52,7 +52,7 @@ final class Computer {
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
         log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
-    static let version = "0.4.3"
+    static let version = "0.4.4"
     func permit(_ request: [String: Any]) throws -> String {
         let bundle = try string(request, "app")
         guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
@@ -128,6 +128,15 @@ final class Computer {
         let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
         let main = axElement(attribute(applicationRoot,kAXMainWindowAttribute)) ?? axElement(attribute(applicationRoot,kAXFocusedWindowAttribute))
         let menu = request["menu"] as? Bool ?? false
+        var request = request
+        if let title = request["windowTitle"] as? String, !title.isEmpty {
+            guard request["window"] == nil else { try fail("INVALID_ARGUMENT","Use window or windowTitle, not both.") }
+            let titles = windows.map { (attribute($0,kAXTitleAttribute) as? String ?? "") }
+            guard let index = titles.firstIndex(where: { $0 == title }) ?? titles.firstIndex(where: { $0.localizedCaseInsensitiveContains(title) }) else {
+                throw Failure(code:"INVALID_WINDOW",message:"No window title contains \(quoted(title)).",details:["titles":titles])
+            }
+            request["window"] = index
+        }
         guard [request["root"] != nil, request["window"] != nil, menu].filter({ $0 }).count <= 1 else { try fail("INVALID_ARGUMENT","Use only one of window, root, or menu.") }
         var roots: [AXUIElement]
         var snapshot = snapshots[pid]
@@ -155,11 +164,21 @@ final class Computer {
         current.time = Date()
         snapshots[pid] = current
         let limit = min(5000,max(1,request["limit"] as? Int ?? 1200))
-        let deadline = started.addingTimeInterval(4)
+        let budget = Double(min(15000,max(1000,request["budgetMs"] as? Int ?? 4000)))/1000
+        let deadline = started.addingTimeInterval(budget)
         var nodes: [[String: Any]] = []
         var seen: Set<Int> = []
         var truncated = false
         var hidden: [(index:Int,depth:Int,place:Place,frame:CGRect)] = []
+        var deferred: [(index:Int,depth:Int,place:Place,children:[AXUIElement])] = []
+        // Moves nodes appended since `from` to just after their container, in reading order.
+        func placeAfter(_ container: Int, from: Int) {
+            guard nodes.count > from else { return }
+            let moved = Array(nodes[from...])
+            nodes.removeSubrange(from...)
+            if let at = nodes.firstIndex(where: { ($0["id"] as? Int) == container }) { nodes.insert(contentsOf:moved,at:at+1) }
+            else { nodes.append(contentsOf:moved) }
+        }
         func walk(_ element: AXUIElement, _ depth: Int, _ parent: Int?, _ inherited: Place) {
             guard nodes.count < limit, depth <= 60, Date() < deadline else { truncated = true; return }
             let index = current.register(element)
@@ -211,7 +230,13 @@ final class Computer {
             nodes.append(node)
             let children = v[12] as? [AXUIElement] ?? []
             if !secure {
-                for child in children { walk(child, depth + 1, index, place) }
+                // Long lists (a file panel on a big folder) wait until the rest of the window
+                // is read, so its buttons are never lost to the time budget.
+                if children.count > 60, Computer.rowRoles.contains(role) || role == "AXBrowser" || role == "AXGrid" {
+                    deferred.append((index,depth,place,children))
+                } else {
+                    for child in children { walk(child, depth + 1, index, place) }
+                }
             }
             // Some apps (Telegram) report rows on a list but expose none as children.
             if children.isEmpty, Computer.rowRoles.contains(role), let frame = node["frame"] as? [String:CGFloat] {
@@ -219,6 +244,11 @@ final class Computer {
             }
         }
         for root in roots { walk(root, 0, start.parent, start.place) }
+        for list in deferred {
+            let before = nodes.count
+            for child in list.children { walk(child, list.depth + 1, list.index, list.place) }
+            placeAfter(list.index, from:before)
+        }
         // Recover those rows by hit-testing the list's visible area, then walk each find.
         var discovered = 0
         for list in hidden {
@@ -250,11 +280,7 @@ final class Computer {
             guard nodes.count > before else { continue }
             for i in before..<nodes.count { nodes[i]["via"] = "hitTest" }
             discovered += nodes.count - before
-            // Keep the outline in reading order: the finds belong right after their list.
-            let moved = Array(nodes[before...])
-            nodes.removeSubrange(before...)
-            if let at = nodes.firstIndex(where: { ($0["id"] as? Int) == list.index }) { nodes.insert(contentsOf:moved,at:at+1) }
-            else { nodes.append(contentsOf:moved) }
+            placeAfter(list.index, from:before)
         }
         var result: [String:Any] = ["app": current.bundle, "pid": pid, "snapshot": current.id, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
             "elapsedMs": Int(Date().timeIntervalSince(started)*1000),
@@ -314,8 +340,21 @@ final class Computer {
         let point = CGPoint(x:bounds.minX+x/capture.scale,y:bounds.minY+y/capture.scale)
         guard bounds.contains(point) else { try fail("INVALID_ARGUMENT","The point is outside the captured window.") }
         var hit: AXUIElement?
-        guard AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(point.x),Float(point.y),&hit) == .success, let hit else {
+        guard AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(point.x),Float(point.y),&hit) == .success, var hit else {
             try fail("UNSUPPORTED_TARGET","The app exposes no accessible element at that point. Observe and use an element instead.")
+        }
+        // The host's hit test stops at the container of a view-service panel (an open or
+        // save panel). Descend through the bridged tree to the smallest element under the point.
+        var container: AXUIElement? = hit
+        while let current = container, roleOf(current) != kAXWindowRole { container = owningWindow(current) ?? parentOf(current) }
+        if let window = container, viewService(in:window,host:app.processIdentifier) != nil {
+            var steps = 0
+            while steps < 40, let children = attribute(hit,kAXChildrenAttribute) as? [AXUIElement], !children.isEmpty {
+                steps += 1
+                let under = children.compactMap { child in elementFrame(child).flatMap { $0.contains(point) ? (child,$0.width*$0.height) : nil } }
+                guard let next = under.min(by: { $0.1 < $1.1 }) else { break }
+                hit = next.0
+            }
         }
         if let window = owningWindow(hit), let frame = elementFrame(window),
            abs(frame.minX-bounds.minX) > 3 || abs(frame.minY-bounds.minY) > 3 || abs(frame.width-bounds.width) > 3 || abs(frame.height-bounds.height) > 3 {
@@ -506,7 +545,7 @@ final class Computer {
             let target = item!
             let action = try string(request, "action")
             if [kAXShowMenuAction,kAXRaiseAction].contains(action) { try fail("FOCUS_UNSAFE", "This action raises a window or opens a menu at the pointer. Use a specific control instead.") }
-            let supported = [kAXPressAction, kAXIncrementAction, kAXDecrementAction, kAXPickAction, kAXConfirmAction, kAXCancelAction, "AXScrollToVisible"]
+            let supported = [kAXPressAction, kAXIncrementAction, kAXDecrementAction, kAXPickAction, kAXConfirmAction, kAXCancelAction, "AXScrollToVisible", "AXOpen"]
             guard supported.contains(action) else { try fail("INVALID_ARGUMENT", "Use one of \(supported.joined(separator:", ")).") }
             guard actionNames(target).contains(action) else { try fail("UNSUPPORTED_ACTION","This element does not offer \(action). Its actions are listed in the snapshot.") }
             settle = 60

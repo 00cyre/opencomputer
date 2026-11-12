@@ -46,6 +46,8 @@ Attributes are read in one batched call per element, so a typical window of abou
 
 Some apps report rows on a list but expose none as children. Observe then hit-tests the list's visible area, walks what it finds, marks those nodes `via: "hitTest"`, and reports `hitTestDiscovered`. Only rows on screen are found: scroll and observe again for more.
 
+Lists with more than 60 children are read after the rest of the window, so controls beside a long list are never lost to the time budget (`budgetMs`, 1000–15000, default 4000). `windowTitle` selects a window by title instead of index.
+
 Element IDs stay valid across actions. A full or window observe of an app replaces that app's snapshot; `root` and `menu` observations extend the current one and keep existing IDs. Snapshots expire 5 minutes after their last use and are scoped to one process. A stale or foreign ID fails with `STALE_SNAPSHOT`.
 
 ### Changed targets

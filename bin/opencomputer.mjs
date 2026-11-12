@@ -6,7 +6,7 @@ import {readLog, formatEntry, logDir} from '../src/log.mjs';
 
 const command = process.argv[2] ?? 'serve';
 if (['--help','-h','help'].includes(command)) {
-  console.log('OpenComputer 0.4.3\n\nopencomputer serve    Local stdio MCP server\nopencomputer doctor   Check native permissions\nopencomputer apps     List running apps\nopencomputer call METHOD JSON   One request (read-only methods recommended)\nopencomputer log [MINUTES] [--app BUNDLE] [--json]   Actions of every session in the last MINUTES (default 60)\n\nSet OPENCOMPUTER_APPS to comma-separated exact bundle IDs, or * to explicitly enable all apps. No apps allowed by default.\nBuild first: npm run build. Requires macOS 14+ and Node 22+.');
+  console.log('OpenComputer 0.4.4\n\nopencomputer serve    Local stdio MCP server\nopencomputer doctor   Check native permissions\nopencomputer apps     List running apps\nopencomputer call METHOD JSON   One request (read-only methods recommended)\nopencomputer log [MINUTES] [--app BUNDLE] [--json]   Actions of every session in the last MINUTES (default 60)\n\nSet OPENCOMPUTER_APPS to comma-separated exact bundle IDs, or * to explicitly enable all apps. No apps allowed by default.\nBuild first: npm run build. Requires macOS 14+ and Node 22+.');
   process.exit(0);
 }
 // Reading the action logs needs no helper and no permissions.
