@@ -44,6 +44,8 @@ A snapshot contains `snapshot`, `app`, `pid`, `nodes`, `windows`, `truncated`, `
 
 Attributes are read in one batched call per element, so a typical window of about a thousand elements reads in well under a second. Trees are bounded to `limit` nodes (default 1200, at most 5000) and 4000 characters per string; `truncated: true` means more exists. Narrow with `{window: index}`, `{root: elementId}`, or the MCP `query` argument rather than raising the limit.
 
+Some apps report rows on a list but expose none as children. Observe then hit-tests the list's visible area, walks what it finds, marks those nodes `via: "hitTest"`, and reports `hitTestDiscovered`. Only rows on screen are found: scroll and observe again for more.
+
 Element IDs stay valid across actions. A full or window observe of an app replaces that app's snapshot; `root` and `menu` observations extend the current one and keep existing IDs. Snapshots expire 5 minutes after their last use and are scoped to one process. A stale or foreign ID fails with `STALE_SNAPSHOT`.
 
 ### Changed targets

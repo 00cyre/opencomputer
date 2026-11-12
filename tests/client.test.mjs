@@ -71,3 +71,23 @@ test('interaction preflight preserves the snapshot and window/subtree observatio
     assert.throws(()=>new Computer({executable,apps:['com.apple.*']}),TypeError);
   } finally {c.close();}
 });
+test('a helper inside a TCC-protected folder is staged under Application Support', async()=>{
+  const {stageExecutable} = await import('../src/computer.mjs');
+  const {mkdir} = await import('node:fs/promises');
+  const {existsSync} = await import('node:fs');
+  const home = await mkdtemp(join(tmpdir(),'opencomputer-home-'));
+  try {
+    await mkdir(join(home,'Documents','oc'),{recursive:true});
+    const inside = join(home,'Documents','oc','opencomputer-native');
+    await writeFile(inside,'#!/bin/sh\n',{mode:0o755});
+    const staged = stageExecutable(inside,home);
+    if (process.platform === 'darwin') {
+      assert.ok(staged.startsWith(join(home,'Library','Application Support','OpenComputer','helper')));
+      assert.ok(existsSync(staged));
+      assert.equal(stageExecutable(inside,home),staged);
+    } else assert.equal(staged,inside);
+    const outside = join(home,'opencomputer-native');
+    await writeFile(outside,'#!/bin/sh\n',{mode:0o755});
+    assert.equal(stageExecutable(outside,home),outside);
+  } finally { await rm(home,{recursive:true,force:true}); }
+});

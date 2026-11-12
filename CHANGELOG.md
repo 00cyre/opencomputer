@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.2 — 2026-11-12
+
+Screenshots stop hanging, and lists that hide their rows become readable.
+
+- **Screenshots from a protected folder.** ScreenCaptureKit waits forever on `replayd` when the helper binary lives in `~/Documents`, `~/Desktop`, `~/Downloads`, or iCloud Drive, even with Screen Recording granted. The JavaScript client now runs a copy staged in `~/Library/Application Support/OpenComputer/helper/`, and capture answers `CAPTURE_TIMEOUT` after 12 s instead of hanging.
+- **Hidden list rows.** A list, table, outline, or scroll area that exposes no children (Telegram's message and chat lists report rows but list none) is hit-tested across its visible area; what it finds is walked like any other element and marked `via: "hitTest"`. The observe result carries `hitTestDiscovered`.
+
 ## 0.4.1 — 2026-11-11
 
 Actions only ever land on the page they observed, and every session leaves a record.

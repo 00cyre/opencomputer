@@ -101,7 +101,7 @@ export async function handle(message, computer) {
   if (message.id === undefined) return null;
   if (message.method === 'initialize') {
     try { await computer.setClientInfo?.(message.params?.clientInfo?.name); } catch (e) { return error(-32603, e.message); }
-    return response({protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'opencomputer',version:'0.4.1'},instructions});
+    return response({protocolVersion:'2024-11-05',capabilities:{tools:{}},serverInfo:{name:'opencomputer',version:'0.4.2'},instructions});
   }
   if (message.method === 'ping') return response({});
   if (message.method === 'tools/list') return response({tools});

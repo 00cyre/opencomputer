@@ -36,3 +36,26 @@ func isSettable(_ element: AXUIElement, _ name: String) -> Bool {
     var settable: DarwinBoolean = false
     return AXUIElementIsAttributeSettable(element,name as CFString,&settable) == .success && settable.boolValue
 }
+
+// ScreenCaptureKit can wait forever on replayd (seen when the helper binary sits in a
+// TCC-protected folder such as ~/Documents). Answer with an error instead of hanging.
+final class OnceGate: @unchecked Sendable {
+    private let lock = NSLock(); private var done = false
+    func claim() -> Bool { lock.lock(); defer { lock.unlock() }; if done { return false }; done = true; return true }
+}
+func captureDeadline<T>(seconds: Double = 12, _ operation: @escaping () async throws -> T) async throws -> T {
+    try await withCheckedThrowingContinuation { (continuation: CheckedContinuation<T,Error>) in
+        let gate = OnceGate()
+        Task {
+            do { let value = try await operation(); if gate.claim() { continuation.resume(returning:value) } }
+            catch { if gate.claim() { continuation.resume(throwing:error) } }
+        }
+        Task {
+            try? await Task.sleep(nanoseconds:UInt64(seconds*1_000_000_000))
+            if gate.claim() {
+                let path = Bundle.main.executablePath ?? CommandLine.arguments[0]
+                continuation.resume(throwing:Failure(code:"CAPTURE_TIMEOUT",message:"ScreenCaptureKit did not answer within \(Int(seconds)) s. If the helper runs from ~/Documents, ~/Desktop, ~/Downloads, or iCloud Drive, macOS blocks capture there: run it from another folder (the JavaScript client stages it in ~/Library/Application Support/OpenComputer automatically).",details:["helper":path]))
+            }
+        }
+    }
+}

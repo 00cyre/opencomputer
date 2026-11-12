@@ -19,6 +19,7 @@ final class Snapshot {
     // Role and label as observed, for logging an element that has since gone away.
     var described: [Int:[String:Any]] = [:]
     init(pid: pid_t, bundle: String) { self.pid = pid; self.bundle = bundle }
+    func contains(_ element: AXUIElement) -> Bool { index[CFHash(element)]?.contains(where: { CFEqual(elements[$0],element) }) ?? false }
     func register(_ element: AXUIElement) -> Int {
         let hash = CFHash(element)
         if let found = index[hash]?.first(where: { CFEqual(elements[$0],element) }) { return found }
@@ -41,6 +42,7 @@ final class Computer {
     let log = ActionLog(ProcessInfo.processInfo.environment)
     static let observed = [kAXRoleAttribute,kAXSubroleAttribute,kAXTitleAttribute,kAXDescriptionAttribute,kAXIdentifierAttribute,kAXValueAttribute,
                            kAXEnabledAttribute,kAXFocusedAttribute,kAXSelectedAttribute,kAXPlaceholderValueAttribute,kAXPositionAttribute,kAXSizeAttribute,kAXChildrenAttribute]
+    static let rowRoles: Set<String> = [kAXListRole,kAXTableRole,kAXOutlineRole,kAXScrollAreaRole,"AXCollection"]
     static let textRoles = [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole,"AXSearchField"]
     // Chromium and Firefox build their web accessibility tree only when asked.
     static let browsers = ["com.google.Chrome","com.brave.Browser","com.microsoft.edgemac","company.thebrowser.Browser","com.vivaldi.Vivaldi","com.operasoftware.Opera","org.chromium.Chromium","com.google.chrome.for.testing","org.mozilla.firefox","ai.perplexity.comet","com.openai.atlas"]
@@ -50,7 +52,7 @@ final class Computer {
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
         log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
-    static let version = "0.4.1"
+    static let version = "0.4.2"
     func permit(_ request: [String: Any]) throws -> String {
         let bundle = try string(request, "app")
         guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
@@ -157,6 +159,7 @@ final class Computer {
         var nodes: [[String: Any]] = []
         var seen: Set<Int> = []
         var truncated = false
+        var hidden: [(index:Int,depth:Int,place:Place,frame:CGRect)] = []
         func walk(_ element: AXUIElement, _ depth: Int, _ parent: Int?, _ inherited: Place) {
             guard nodes.count < limit, depth <= 60, Date() < deadline else { truncated = true; return }
             let index = current.register(element)
@@ -206,22 +209,65 @@ final class Computer {
                 node["frame"] = ["x": point.x, "y": point.y, "width": size.width, "height": size.height]
             }
             nodes.append(node)
+            let children = v[12] as? [AXUIElement] ?? []
             if !secure {
-                for child in v[12] as? [AXUIElement] ?? [] { walk(child, depth + 1, index, place) }
+                for child in children { walk(child, depth + 1, index, place) }
+            }
+            // Some apps (Telegram) report rows on a list but expose none as children.
+            if children.isEmpty, Computer.rowRoles.contains(role), let frame = node["frame"] as? [String:CGFloat] {
+                hidden.append((index,depth,place,CGRect(x:frame["x"]!,y:frame["y"]!,width:frame["width"]!,height:frame["height"]!)))
             }
         }
         for root in roots { walk(root, 0, start.parent, start.place) }
+        // Recover those rows by hit-testing the list's visible area, then walk each find.
+        var discovered = 0
+        for list in hidden {
+            var visible = list.frame
+            if let w = list.place.window, let wf = elementFrame(current.elements[w]) { visible = visible.intersection(wf) }
+            if let p = current.parents[list.index], let pf = elementFrame(current.elements[p]), pf.width > 1, pf.height > 1 { visible = visible.intersection(pf) }
+            guard !visible.isNull, visible.width >= 8, visible.height >= 8 else { continue }
+            var found: [(AXUIElement,CGPoint)] = []
+            var probes = 0
+            var y = visible.minY + 4
+            while y < visible.maxY, probes < 4000, Date() < deadline {
+                var x = visible.minX + 12
+                while x < visible.maxX, probes < 4000 {
+                    probes += 1
+                    var hit: AXUIElement?
+                    if AXUIElementCopyElementAtPosition(applicationRoot,Float(x),Float(y),&hit) == .success, let hit,
+                       !current.contains(hit), !found.contains(where: { CFEqual($0.0,hit) }),
+                       ![kAXWindowRole,kAXApplicationRole].contains(roleOf(hit)) {
+                        found.append((hit,elementFrame(hit)?.origin ?? CGPoint(x:x,y:y)))
+                    }
+                    x += 24
+                }
+                y += 8
+            }
+            guard !found.isEmpty else { continue }
+            found.sort { ($0.1.y,$0.1.x) < ($1.1.y,$1.1.x) }
+            let before = nodes.count
+            for (element,_) in found { walk(element, list.depth + 1, list.index, list.place) }
+            guard nodes.count > before else { continue }
+            for i in before..<nodes.count { nodes[i]["via"] = "hitTest" }
+            discovered += nodes.count - before
+            // Keep the outline in reading order: the finds belong right after their list.
+            let moved = Array(nodes[before...])
+            nodes.removeSubrange(before...)
+            if let at = nodes.firstIndex(where: { ($0["id"] as? Int) == list.index }) { nodes.insert(contentsOf:moved,at:at+1) }
+            else { nodes.append(contentsOf:moved) }
+        }
         var result: [String:Any] = ["app": current.bundle, "pid": pid, "snapshot": current.id, "nodes": nodes, "truncated": truncated, "frontmostApp": frontmost(),
             "elapsedMs": Int(Date().timeIntervalSince(started)*1000),
             "windows":windows.enumerated().map { index, window in ["index":index,"title":attribute(window,kAXTitleAttribute) as? String ?? "","minimized":attribute(window,kAXMinimizedAttribute) as? Bool ?? false,"main":main.map { CFEqual(window,$0) } ?? false] as [String:Any] }]
         if let index = request["window"] as? Int { result["selectedWindow"] = index }
         if webJustEnabled { result["webAccessibilityEnabled"] = true }
+        if discovered > 0 { result["hitTestDiscovered"] = discovered }
         overlay.track(app,element:roots.first.flatMap { owningWindow($0) },action:"Reading window")
         return result
     }
     func screenshot(_ app: NSRunningApplication, _ request: [String: Any]) async throws -> [String: Any] {
         guard CGPreflightScreenCaptureAccess() else { try fail("SCREEN_RECORDING_REQUIRED", "Allow Screen Recording for the launching host in System Settings, then restart it.") }
-        let content = try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false)
+        let content = try await captureDeadline { try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) }
         let windows = content.windows.filter { $0.owningApplication?.processID == app.processIdentifier && $0.windowLayer == 0 && $0.frame.width > 1 && $0.frame.height > 1 }
         guard !windows.isEmpty else { try fail("NO_WINDOW", "No capturable window for this app. Restore a window and try again.") }
         let window: SCWindow
@@ -245,7 +291,7 @@ final class Computer {
         config.width = max(1, Int(window.frame.width * scale))
         config.height = max(1, Int(window.frame.height * scale))
         config.showsCursor = false
-        let cgImage = try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config)
+        let cgImage = try await captureDeadline { try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) }
         let bitmap = NSBitmapImageRep(cgImage: cgImage)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
         // The page at the window's centre identifies which tab the picture shows.

@@ -1,6 +1,32 @@
 import {spawn} from 'node:child_process';
 import {createInterface} from 'node:readline';
 import {fileURLToPath} from 'node:url';
+import {copyFileSync, chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync} from 'node:fs';
+import {homedir} from 'node:os';
+import {join, sep} from 'node:path';
+
+// macOS ScreenCaptureKit hangs for a helper binary inside a TCC-protected folder
+// (~/Documents, ~/Desktop, ~/Downloads, iCloud Drive). Run a copy from Application Support.
+export function stageExecutable(path, home = homedir()) {
+  const protectedDirs = ['Documents', 'Desktop', 'Downloads', join('Library', 'Mobile Documents')].map(d => join(home, d) + sep);
+  if (process.platform !== 'darwin' || !protectedDirs.some(d => path.startsWith(d))) return path;
+  try {
+    const info = statSync(path);
+    const dir = join(home, 'Library', 'Application Support', 'OpenComputer', 'helper', `${info.size}-${Math.floor(info.mtimeMs)}`);
+    const target = join(dir, 'opencomputer-native');
+    if (!existsSync(target)) {
+      mkdirSync(dir, {recursive: true});
+      const temp = `${target}.${process.pid}.tmp`;
+      copyFileSync(path, temp);
+      chmodSync(temp, 0o755);
+      renameSync(temp, target);
+      // Older copies go; helpers already running keep their open binary.
+      const parent = join(dir, '..');
+      for (const name of readdirSync(parent)) if (join(parent, name) !== dir) rmSync(join(parent, name), {recursive: true, force: true});
+    }
+    return target;
+  } catch { return path; }
+}
 
 export class ComputerError extends Error {
   constructor(code, message, details) { super(message); this.name = 'ComputerError'; this.code = code; if (details !== undefined) this.details = details; }
@@ -14,7 +40,7 @@ export class Computer {
     if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
     this.#explicitAgent = agent;
     this.timeoutMs = timeoutMs;
-    this.#child = spawn(executable, [], {env: {...process.env, OPENCOMPUTER_APPS: apps.join(','), OPENCOMPUTER_AGENT: agent ?? "Agent", OPENCOMPUTER_OVERLAY: overlay ? "1" : "0"}, stdio: ['pipe','pipe','pipe']});
+    this.#child = spawn(stageExecutable(executable), [], {env: {...process.env, OPENCOMPUTER_APPS: apps.join(','), OPENCOMPUTER_AGENT: agent ?? "Agent", OPENCOMPUTER_OVERLAY: overlay ? "1" : "0"}, stdio: ['pipe','pipe','pipe']});
     // Native diagnostics go only to stderr; stdout is reserved for the protocol.
     this.#child.stderr.on('data', data => process.stderr.write(data));
     const lines = createInterface({input: this.#child.stdout});
