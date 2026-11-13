@@ -1,0 +1,59 @@
+name: App compatibility report
+description: Tell us how OpenComputer works with a specific Mac app.
+title: "[App] "
+labels: ["compatibility"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks! Reports like this show which apps work in the background and where public macOS APIs fall short. Please use disposable data and leave out private screenshots, message contents, and tokens.
+  - type: input
+    id: app
+    attributes:
+      label: App and version
+      placeholder: "Notes 4.12"
+    validations:
+      required: true
+  - type: input
+    id: bundle
+    attributes:
+      label: Bundle ID
+      description: "`node bin/opencomputer.mjs apps` lists them."
+      placeholder: com.apple.Notes
+  - type: input
+    id: environment
+    attributes:
+      label: OpenComputer version, macOS version, chip
+      placeholder: "0.5.0, macOS 15.3, Apple Silicon"
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client or API
+      placeholder: "Claude Code, Grok Build, JavaScript API, ..."
+  - type: checkboxes
+    id: worked
+    attributes:
+      label: What worked
+      options:
+        - label: observe (the outline shows the controls I needed)
+        - label: click
+        - label: setValue or typeText
+        - label: pressKey
+        - label: scroll
+        - label: screenshot
+        - label: menu
+  - type: textarea
+    id: failed
+    attributes:
+      label: What didn't work
+      description: The action, the error code if any (for example USER_BUSY, TARGET_CHANGED, STALE_ELEMENT), and what you expected.
+    validations:
+      required: true
+  - type: textarea
+    id: outline
+    attributes:
+      label: Relevant outline excerpt (optional)
+      description: A few lines around the control, with any personal content removed.
+      render: text
