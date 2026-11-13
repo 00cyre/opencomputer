@@ -1,0 +1,41 @@
+name: Overlay screenshots
+# Runs the live overlay UI test on a macOS runner's desktop session and keeps
+# the captured PNGs (dark and light) as a build artifact for reviews and docs.
+on:
+  push:
+    paths:
+      - 'native/**'
+      - 'tests/overlay-ui.swift'
+      - 'scripts/test-ui.sh'
+      - 'scripts/build-fixture.sh'
+      - 'tests/fixture.swift'
+      - '.github/workflows/screenshots.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  capture:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run fixture:build
+      - name: Dark appearance
+        run: bash scripts/test-ui.sh
+        env:
+          OPENCOMPUTER_UI_APPEARANCE: dark
+          OPENCOMPUTER_UI_OUTPUT: work/overlay-ui/dark
+      - name: Light appearance
+        if: always()
+        run: bash scripts/test-ui.sh
+        env:
+          OPENCOMPUTER_UI_APPEARANCE: light
+          OPENCOMPUTER_UI_OUTPUT: work/overlay-ui/light
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: overlay-screenshots
+          path: work/overlay-ui/**/*.png
+          if-no-files-found: warn
