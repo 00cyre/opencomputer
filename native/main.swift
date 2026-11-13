@@ -36,12 +36,20 @@ final class Computer {
     // Full access, and read-only access (entries written bundle:read). "*" covers every app.
     let allowed: Set<String>
     let readable: Set<String>
+    let clickable: Set<String>
+    // Apps this helper was started from: the agent's own terminal, editor, or chat app.
+    let hosts: Set<String>
+    // Requests that touched an app since the session began or was last released.
+    var tally: [String:Int] = [:]
+    var touched: Set<String> = []
     let overlay = ActivityOverlay()
     let focus = FocusGuard()
     let interaction = InteractionGuard()
     var snapshots: [pid_t:Snapshot] = [:]
     var captures: [pid_t:Capture] = [:]
     var webEnabled: Set<pid_t> = []
+    var watches: [pid_t:ChangeWatch] = [:]
+    var watchOrder: [pid_t] = []
     let defaultWait: Int
     let log = ActionLog(ProcessInfo.processInfo.environment)
     static let observed = [kAXRoleAttribute,kAXSubroleAttribute,kAXTitleAttribute,kAXDescriptionAttribute,kAXIdentifierAttribute,kAXValueAttribute,
@@ -54,32 +62,61 @@ final class Computer {
     init() {
         let env = ProcessInfo.processInfo.environment
         let entries = (env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
-        allowed = Set(entries.filter { !$0.hasSuffix(":read") })
-        readable = Set(entries.filter { $0.hasSuffix(":read") }.map { String($0.dropLast(5)) })
+        let level = { (suffix: String) in Set(entries.filter { $0.hasSuffix(suffix) }.map { String($0.dropLast(suffix.count)) }) }
+        allowed = Set(entries.filter { !$0.hasSuffix(":read") && !$0.hasSuffix(":click") })
+        readable = level(":read")
+        clickable = level(":click")
+        hosts = Set(ancestry(getppid(), levels: 10).compactMap { ($0["pid"] as? pid_t).flatMap { NSRunningApplication(processIdentifier: $0)?.bundleIdentifier } })
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
-        log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":Computer.listed(allowed,readable),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
+        log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":Computer.listed(allowed,readable,clickable),"hosts":hosts.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
     static let version = "0.4.4"
     // Methods that change an app. Read-only access refuses them before anything is resolved.
     static let acting: Set<String> = ["click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
-    static func listed(_ full: Set<String>, _ read: Set<String>) -> [String] { full.sorted() + read.sorted().map { $0 + ":read" } }
-    // An explicit bundle:read entry wins over "*", so one app can stay read-only while the rest are open.
+    // What bundle:click allows: pressing and scrolling, never text, values, keys, or links.
+    static let clicking: Set<String> = ["click","clickPoint","performAction","scroll"]
+    static func listed(_ full: Set<String>, _ read: Set<String>, _ click: Set<String>) -> [String] { full.sorted() + click.sorted().map { $0 + ":click" } + read.sorted().map { $0 + ":read" } }
+    // "*" never lets the agent act in the app it runs in, so it cannot press its own approval
+    // prompts or type into its own chat. Listing that app by name allows it.
+    func shielded(_ bundle: String) -> Bool {
+        hosts.contains(bundle) && !allowed.contains(bundle) && !clickable.contains(bundle) && !readable.contains(bundle) && (allowed.contains("*") || clickable.contains("*"))
+    }
+    // An app's own entry wins over "*", so one app can stay read-only while the rest are open.
     func access(_ bundle: String) -> String {
         if readable.contains(bundle) { return "read" }
-        if allowed.contains(bundle) || allowed.contains("*") { return "full" }
+        if allowed.contains(bundle) { return "full" }
+        if clickable.contains(bundle) { return "click" }
+        if shielded(bundle) { return "read" }
+        if allowed.contains("*") { return "full" }
+        if clickable.contains("*") { return "click" }
         return readable.contains("*") ? "read" : "none"
     }
-    func permit(_ request: [String: Any], acting: Bool = false) throws -> String {
+    func permit(_ request: [String: Any], method: String) throws -> String {
         let bundle = try string(request, "app")
-        switch access(bundle) {
-        case "none": try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.")
-        case "read" where acting:
-            throw Failure(code:"READ_ONLY_APP",message:"\(bundle) is allowed read-only: observe, screenshot, readText, and waitFor work, but actions and opening links do not. Nothing was sent.",details:["dispatched":false,"access":"read"])
-        default: return bundle
+        let level = access(bundle)
+        if level == "none" { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
+        // Launching is allowed at every level; opening a link changes what the app shows.
+        guard Computer.acting.contains(method) || (method == "open" && request["url"] != nil) else { return bundle }
+        if shielded(bundle) {
+            throw Failure(code:"HOST_APP_PROTECTED",message:"\(bundle) is the app this agent runs in, so * does not let it act there: observe and screenshot work, but actions do not. The person can list \(bundle) in OPENCOMPUTER_APPS by name to allow it. Nothing was sent.",details:["dispatched":false,"access":"read"])
         }
+        if level == "read" {
+            throw Failure(code:"READ_ONLY_APP",message:"\(bundle) is allowed read-only: observe, screenshot, readText, and waitFor work, but actions and opening links do not. Nothing was sent.",details:["dispatched":false,"access":"read"])
+        }
+        if level == "click", !Computer.clicking.contains(method) {
+            throw Failure(code:"CLICK_ONLY_APP",message:"\(bundle) is allowed to click and scroll only: setValue, typeText, pressKey, and opening links do not work there. Nothing was sent.",details:["dispatched":false,"access":"click"])
+        }
+        return bundle
+    }
+    // Counts what this session did, for the summary release returns.
+    func count(_ entry: [String:Any]) {
+        guard let event = entry["event"] as? String, Computer.acting.contains(event) || event == "open", var outcome = entry["outcome"] as? String else { return }
+        if event == "open", outcome == "ok" { outcome = "dispatched" }
+        tally[outcome, default: 0] += 1
+        if outcome == "dispatched", let app = entry["app"] as? String { touched.insert(app) }
     }
     func target(_ request: [String: Any]) throws -> NSRunningApplication {
-        let bundle = try permit(request, acting: Computer.acting.contains(request["method"] as? String ?? ""))
+        let bundle = try permit(request, method: request["method"] as? String ?? "")
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
         if let pid = request["pid"] as? Int {
             guard let app = apps.first(where: { Int($0.processIdentifier) == pid }) else { try fail("APP_NOT_RUNNING", "No running instance of \(bundle) has pid \(pid). Call apps for current pids.") }
@@ -144,6 +181,7 @@ final class Computer {
         let applicationRoot = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(applicationRoot, 2)
         let webJustEnabled = enableWeb(app)
+        watchChanges(pid)
         if webJustEnabled { try? await Task.sleep(nanoseconds:350_000_000) }
         let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
         let main = axElement(attribute(applicationRoot,kAXMainWindowAttribute)) ?? axElement(attribute(applicationRoot,kAXFocusedWindowAttribute))
@@ -362,11 +400,12 @@ final class Computer {
         note?.merge(["window":cleanLabel(window.title ?? "",limit:160)])
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
-        // A whole window is at most 1600 px on its long side; a zoomed region goes up to the
-        // display's own pixel density, so small text becomes legible.
+        // A whole window is at most maxEdge (default 1600) px on its long side; a zoomed region
+        // goes up to the display's own pixel density, so small text becomes legible.
         let source = zoom ?? CGRect(origin:.zero,size:window.frame.size)
         let density: CGFloat = zoom == nil ? 1 : max(1,CGFloat(filter.pointPixelScale))
-        let scale = min(density, 1600 / max(source.width, source.height))
+        let edge = CGFloat(min(4000, max(200, request["maxEdge"] as? Int ?? 1600)))
+        let scale = min(density, edge / max(source.width, source.height))
         if let zoom { config.sourceRect = zoom }
         config.width = max(1, Int(source.width * scale))
         config.height = max(1, Int(source.height * scale))
@@ -530,8 +569,7 @@ final class Computer {
         return true
     }
     func open(_ request: [String:Any]) async throws -> [String:Any] {
-        // Launching is allowed read-only; opening a link changes what the app shows.
-        let bundle = try permit(request, acting: request["url"] != nil)
+        let bundle = try permit(request, method: "open")
         guard let location = NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { try fail("APP_NOT_FOUND","No installed app has bundle ID \(bundle).") }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
@@ -562,13 +600,16 @@ final class Computer {
         defer { self.note = nil }
         do {
             let result = try await dispatch(request)
-            log.write(note.finish(result))
+            let entry = note.finish(result)
+            log.write(entry); count(entry)
             return result
         } catch let error as Failure {
-            log.write(note.failed(error.code,error.message,error.details))
+            let entry = note.failed(error.code,error.message,error.details)
+            log.write(entry); count(entry)
             throw error
         } catch {
-            log.write(note.failed("NATIVE_ERROR",error.localizedDescription,nil))
+            let entry = note.failed("NATIVE_ERROR",error.localizedDescription,nil)
+            log.write(entry); count(entry)
             throw error
         }
     }
@@ -576,13 +617,16 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": Computer.listed(allowed,readable), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": Computer.listed(allowed,readable,clickable), "protectedHosts": hosts.filter { shielded($0) }.sorted(), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
         case "release":
-            overlay.release(); snapshots = [:]; captures = [:]
-            return ["released":true]
+            overlay.release(); snapshots = [:]; captures = [:]; stopWatching()
+            // What the task did, so the agent can report it; the action log has the details.
+            let summary: [String:Any] = ["actions":tally["dispatched"] ?? 0, "refused":tally["refused"] ?? 0, "failed":tally["failed"] ?? 0, "apps":touched.sorted()]
+            tally = [:]; touched = []
+            return ["released":true, "summary":summary, "actionLog":log.path ?? NSNull()]
         case "apps":
             let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
                 ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "frontmost": $0.isActive, "hidden": $0.isHidden, "allowed": access($0.bundleIdentifier ?? "") != "none", "access": access($0.bundleIdentifier ?? "")] as [String: Any]
@@ -591,13 +635,14 @@ final class Computer {
         case "open": return try await open(request)
         default: break
         }
-        guard ["observe", "screenshot", "readText", "checkInteraction", "click", "clickPoint", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
+        guard ["observe", "screenshot", "readText", "settle", "checkInteraction", "click", "clickPoint", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
         let app = try target(request)
         let pid = app.processIdentifier
         if method == "screenshot" { return try await screenshot(app, request) }
         try trusted()
         if method == "observe" { return try await observe(app,request) }
         if method == "readText" { return try readText(app,request) }
+        if method == "settle" { return await settle(app,request) }
         let elementOptional = ["checkInteraction","pressKey","clickPoint"].contains(method)
         var resolved: (snapshot: Snapshot, index: Int, element: AXUIElement)?
         var item: AXUIElement?

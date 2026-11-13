@@ -95,10 +95,10 @@ func menuShortcut(_ element: AXUIElement) -> String? {
     // kAXMenuItemModifier bits: shift 1, option 2, control 4, and 8 when there is no command key.
     let flags = (list[2] as? NSNumber)?.intValue ?? 0
     var parts: [String] = []
+    if flags & 8 == 0 { parts.append("cmd") }
     if flags & 4 != 0 { parts.append("ctrl") }
     if flags & 2 != 0 { parts.append("alt") }
     if flags & 1 != 0 { parts.append("shift") }
-    if flags & 8 == 0 { parts.append("cmd") }
     return (parts + [key]).joined(separator: "+")
 }
 

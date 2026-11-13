@@ -40,11 +40,16 @@ export function matcher(query) {
   };
 }
 
+/** Sheets and dialogs: while one is open, controls behind it usually do not respond. */
+export const modal = node => node.role === 'AXSheet' || (node.role === 'AXWindow' && ['AXDialog','AXSystemDialog'].includes(node.subrole));
+
 function header(result) {
   const nodes = result.nodes ?? [];
   const head = [`app ${result.app} pid ${result.pid} snapshot ${result.snapshot}`,
     `${nodes.length} elements in ${result.elapsedMs ?? '?'} ms; frontmost app: ${result.frontmostApp}`];
   if (result.windows?.length) head.push('windows: ' + result.windows.map(w => `[${w.index}] ${JSON.stringify(clip(w.title,60))}${w.main ? ' main' : ''}${w.minimized ? ' minimized' : ''}`).join('  '));
+  const dialogs = nodes.filter(modal);
+  if (dialogs.length) head.push(`open dialog: ${dialogs.slice(0,3).map(line).join('; ')}. Answer it first: controls behind it usually do not respond.`);
   if (result.webAccessibilityEnabled) head.push('Web accessibility was just switched on for this app; observe again if page content is missing.');
   if (result.truncated) head.push('Truncated: narrow with window, root, or query, or raise limit.');
   return head;
@@ -83,11 +88,16 @@ export function lines(result) {
 // "[12] Button "Send" editable" -> "Button "Send" editable", to show what an element was.
 const body = text => text.replace(/^\[\d+\]\s*/,'');
 
+const kinds = counts => Object.entries(counts ?? {}).sort((a, b) => b[1] - a[1]).slice(0,5).map(([name, n]) => `${name.replace(/Notification$/,'')} ${n}`).join(', ');
+
 /**
  * What changed between two reads of one snapshot: elements that appeared (+), went away
  * (-), or read differently (~, with what they were). Ids are shared by both reads.
+ * `settled` is the helper's settle result for the wait before the second read: with it, a
+ * read that shows nothing new says whether the app reported changes the outline cannot
+ * show, or none at all (`quietHint` is added then).
  */
-export function changes(before, result, {query, maxLines = 300, maxChars = 40000} = {}) {
+export function changes(before, result, {query, maxLines = 300, maxChars = 40000, settled, quietHint} = {}) {
   const after = lines(result);
   const keep = query === undefined ? () => true : (() => { const match = matcher(query); const byId = new Map((result.nodes ?? []).map(n => [n.id, n])); return id => byId.has(id) && match(byId.get(id)); })();
   const out = [];
@@ -104,6 +114,13 @@ export function changes(before, result, {query, maxLines = 300, maxChars = 40000
   head[0] += ' (re-read; earlier ids still apply)';
   const total = added + changed + removed;
   head.push(total ? `changes since the last read: ${added} added, ${changed} changed, ${removed} removed${query === undefined ? '' : ` among elements matching ${JSON.stringify(query)}`}` : 'No changes since the last read.');
+  if (settled?.watched) {
+    head.push(`${settled.settled === false ? 'still changing after' : 'settled after'} ${settled.waitedMs} ms; the app sent ${settled.notifications} accessibility notification${settled.notifications === 1 ? '' : 's'}${settled.notifications ? ` (${kinds(settled.kinds)})` : ''}`);
+    if (!total && settled.notifications === 0) head.push('The app reported no change either, so this most likely had no effect.' + (quietHint ? ' ' + quietHint : ''));
+    else if (!total) head.push('The app reported changes this outline does not show: they may be in another window, a menu, or past the read limit.');
+  }
+  const focused = (result.nodes ?? []).find(node => node.focused);
+  if (focused) head.push('focused: ' + line(focused));
   if (result.truncated) head.push('Elements this read did not reach are not reported as removed.');
   let shown = out;
   if (out.length > maxLines) shown = [...out.slice(0,maxLines), `… ${out.length - maxLines} more lines: observe without changes for the full outline.`];

@@ -1,13 +1,17 @@
 import Foundation
+import CryptoKit
 
 // One JSON line per request that touches an app, in one file per helper process (one
 // MCP or JavaScript connection), so what a session did can be reconstructed afterwards.
 // Typed text and set values are never written, only their length. Page addresses lose
 // their query and fragment. Files are private to the user and pruned after 30 days.
+// Each line carries "prev", the start of the SHA-256 of the line before it ("" on the
+// first), so `opencomputer log --verify` notices a line changed or removed inside a file.
 @MainActor
 final class ActionLog {
     static let methods: Set<String> = ["configure","release","open","observe","screenshot","readText","click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
     private var handle: FileHandle?
+    private var previous = ""
     private(set) var path: String?
     private static let clock: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime,.withFractionalSeconds]; return f }()
     init(_ env: [String:String]) {
@@ -31,11 +35,12 @@ final class ActionLog {
     }
     func write(_ entry: [String:Any]) {
         guard let handle, let body = try? JSONSerialization.data(withJSONObject:entry,options:[.sortedKeys]), body.count > 1 else { return }
-        var line = Data("{\"time\":\"\(ActionLog.clock.string(from:Date()))\"".utf8)
+        var line = Data("{\"time\":\"\(ActionLog.clock.string(from:Date()))\",\"prev\":\"\(previous)\"".utf8)
         if body.count > 2 { line.append(Data(",".utf8)) }
         line.append(body.dropFirst())
+        let digest = SHA256.hash(data:line).prefix(16).map { String(format:"%02x",$0) }.joined()
         line.append(0x0a)
-        try? handle.write(contentsOf:line)
+        do { try handle.write(contentsOf:line); previous = digest } catch {}
     }
 }
 
@@ -43,8 +48,8 @@ final class ActionLog {
 final class Note {
     var fields: [String:Any]
     let started = Date()
-    static let copied = ["app","pid","snapshot","element","root","menu","limit","windowId","x","y","action","keys","count","direction","pages","waitMs","intrusive","refresh","marks","ocr","region","offset","length"]
-    static let kept = ["dispatched","delivery","confirmed","elementFocused","focusChanged","focusRestored","frontmostBefore","frontmostAfter","opened","snapshot","truncated","windowId","selectionRequired","released","agent","target","pressed","refreshed","zoomed","marked","totalLength","source"]
+    static let copied = ["app","pid","snapshot","element","root","menu","limit","windowId","x","y","action","keys","count","direction","pages","waitMs","intrusive","refresh","marks","ocr","region","offset","length","maxEdge"]
+    static let kept = ["dispatched","delivery","confirmed","elementFocused","focusChanged","focusRestored","frontmostBefore","frontmostAfter","opened","snapshot","truncated","windowId","selectionRequired","released","agent","target","pressed","refreshed","zoomed","marked","totalLength","source","summary"]
     init(_ method: String, _ request: [String:Any]) {
         fields = ["event":method]
         for key in Note.copied { if let value = request[key] { fields[key] = value } }

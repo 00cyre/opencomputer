@@ -5,7 +5,7 @@ import {copyFileSync, chmodSync, existsSync, mkdirSync, readdirSync, renameSync,
 import {homedir} from 'node:os';
 import {join, sep} from 'node:path';
 import {ComputerError} from './errors.mjs';
-import {chooseMenu, viewsOf, waitFor} from './flows.mjs';
+import {chooseMenu, expectations, pressByMenu, viewsOf, waitFor} from './flows.mjs';
 
 export {ComputerError};
 
@@ -36,8 +36,9 @@ export function stageExecutable(path, home = homedir()) {
 export class Computer {
   #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent; #clientName;
   constructor({apps = [], agent, overlay = true, executable = process.env.OPENCOMPUTER_NATIVE || fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
-    // bundle:read (or *:read) allows observing and screenshots of that app, but no actions.
-    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || !/^(\*|[a-zA-Z0-9._-]+)(:read)?$/.test(x))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps, each optionally ending in :read for read-only access');
+    // bundle:read (or *:read) allows observing and screenshots of that app, but no actions;
+    // bundle:click (or *:click) also allows clicking and scrolling, but no text or keys.
+    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || !/^(\*|[a-zA-Z0-9._-]+)(:read|:click)?$/.test(x))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps, each optionally ending in :read (read-only) or :click (click and scroll only)');
     if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
     this.#explicitAgent = agent;
     this.timeoutMs = timeoutMs;
@@ -129,8 +130,8 @@ class App {
     this.#snapshot = result.snapshot;
     return result;
   }
-  /** Capture a window. `marks` labels element ids, `region` zooms into the last screenshot, `ocr` adds recognized text lines. */
-  getScreenshot(windowId, {marks, region, ocr} = {}) { return this.#computer.request('screenshot', {...this.#scope(), windowId, marks, region, ocr}); }
+  /** Capture a window. `marks` labels element ids, `region` zooms into the last screenshot, `ocr` adds recognized text lines, `maxEdge` caps the long side in pixels. */
+  getScreenshot(windowId, {marks, region, ocr, maxEdge} = {}) { return this.#computer.request('screenshot', {...this.#scope(), windowId, marks, region, ocr, maxEdge}); }
   /** Full text of an element, or of everything inside a container, from `offset` (UTF-16 units). */
   readText(element, {offset, length} = {}) {
     if (!this.#snapshot) return Promise.reject(new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before reading an element'));
@@ -152,6 +153,20 @@ class App {
     this.#snapshot = result.snapshot;
     return result;
   }
+  /**
+   * Check conditions such as [{query:'Sheet Save', exists:false}] or [{element:12, valueContains:'Hi'}]
+   * against a fresh read (re-reading until they hold, up to `timeoutMs`). Resolves with
+   * {outcome: 'confirmed'|'deviation'|'unverifiable', results, result}.
+   */
+  async verify(expect, {timeoutMs, window, windowTitle} = {}) {
+    if (!Array.isArray(expect) || !expect.length) throw new ComputerError('INVALID_ARGUMENT', 'expect is a non-empty array of conditions');
+    const views = viewsOf(this.#computer);
+    if (this.#snapshot && views.get(this.#bundle)?.snapshot !== this.#snapshot) views.remember(this.#bundle, {snapshot:this.#snapshot, nodes:[]}, {});
+    const scope = {...this.#scope(), ...(window === undefined ? {} : {window}), ...(windowTitle === undefined ? {} : {windowTitle})};
+    const {result, verdict} = await expectations((method, args) => this.#computer.request(method, args), views, scope, expect, {timeoutMs:Math.min(Number(timeoutMs) || 0, 30000)});
+    this.#snapshot = result.snapshot;
+    return {...verdict, result};
+  }
   checkInteraction(element, {intrusive} = {}) {
     if (element !== undefined && !this.#snapshot) return Promise.reject(new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before checking an element'));
     return this.#computer.request('checkInteraction', {...this.#scope(), ...(element === undefined ? {} : {snapshot:this.#snapshot, element}), intrusive});
@@ -166,8 +181,12 @@ class App {
   setValue(element, value, options) { return this.#action('setValue', element, {value, ...options}); }
   performSecondaryAction(element, action, options) { return this.#action('performAction', element, {action, ...options}); }
   typeText(element, text, options) { return this.#action('typeText', element, {text, ...options}); }
-  /** Send a key to this app only. `element` is optional; give one to focus it first. */
-  pressKey(key, {element, ...options} = {}) {
+  /**
+   * Send a key to this app only. `element` is optional; give one to focus it first.
+   * `via: 'menu'` presses the menu bar item that has this shortcut instead of sending keys.
+   */
+  pressKey(key, {element, via, ...options} = {}) {
+    if (via === 'menu') return pressByMenu((method, args) => this.#computer.request(method, args), {...this.#scope(), key, ...options});
     if (element === undefined) return this.#computer.request('pressKey', {...this.#scope(), key, ...options});
     return this.#action('pressKey', element, {key, ...options});
   }

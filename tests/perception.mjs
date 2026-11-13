@@ -1,5 +1,6 @@
 // Live checks for reading features: read-only access, ID-preserving re-reads, element marks,
-// zoomed capture with clickPoint, text recognition, readText, menu paths, and waitFor.
+// zoomed capture with clickPoint, text recognition, readText, menu paths, and waitFor; and
+// for settle, verify, shortcuts through the menu bar, click-only access, and release summaries.
 // Needs a logged-in Mac with Accessibility and Screen Recording, and `npm run fixture:build`.
 import assert from 'node:assert/strict';
 import {createComputer} from '../src/computer.mjs';
@@ -73,5 +74,25 @@ try {
   check(chosen.menuItem==='Tools > Stamp Document…'&&!chosen.focusChanged,'menu path pressed without taking the foreground');
   await settle();
   check((await state()).stamps===1,'the menu command ran once');
+
+  // Settle, verify, and shortcuts through the menu bar.
+  const settled=await c.request('settle',{app:bundle});
+  check(settled.watched===true&&typeof settled.waitedMs==='number','settle watches an observed app');
+  const viaMenu=await app.pressKey('cmd+shift+k',{via:'menu'});
+  check(viaMenu.menuItem==='Tools > Stamp Document…'&&viaMenu.delivery==='menu','pressKey via menu presses the item with that shortcut');
+  await settle();
+  check((await state()).stamps===2,'the shortcut ran the command once');
+  check((await app.verify([{query:'benchmark-input',valueContains:'perception'}])).outcome==='confirmed','verify confirms the field value');
+  check((await app.verify([{query:'benchmark-input',value:'nope'}])).outcome==='deviation','verify reports a deviation');
+
+  // Click-only access presses but does not type.
+  const clicker=createComputer({apps:[`${bundle}:click`]});
+  try {
+    const limited=clicker.getApp(bundle);
+    const t=await limited.getAXState();
+    await assert.rejects(limited.setValue(t.nodes.find(x=>x.identifier==='benchmark-input').id,'no'),e=>e.code==='CLICK_ONLY_APP'&&e.details.dispatched===false);checks++;
+  } finally {clicker.close();}
+  const released=await c.request('release');
+  check(released.summary.actions>=4&&released.summary.apps.includes(bundle),'release summarizes what the session did');
   console.log(JSON.stringify({passed:checks},null,2));
 } finally {reader.close();c.close();fixture.kill();await rm(dir,{recursive:true,force:true});}
