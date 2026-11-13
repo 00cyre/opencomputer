@@ -11,4 +11,10 @@ for SERVICE in kTCCServiceAccessibility kTCCServiceScreenCapture kTCCServicePost
     || echo "Could not allow $SERVICE for Terminal."
 done
 sudo sqlite3 "$DB" "SELECT service, auth_value FROM access WHERE client = 'com.apple.Terminal';" || true
+# macOS 15 and later also ask, in a dialog that stays on screen, before an app captures the
+# screen without the system picker. scripts/record-demo.sh raises that question before it
+# records and runs work/ci-capture-alert to press Allow, as the person would once.
+mkdir -p work
+swiftc -O -o work/ci-capture-alert scripts/ci-capture-alert.swift || echo "Could not build the screen capture answerer."
+sw_vers -productVersion
 exit 0
