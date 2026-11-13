@@ -346,18 +346,20 @@ final class ActivityView: NSView {
 /// visible target. It eases between targets, tilts with its motion, and dips with a ripple
 /// when an action lands. Purely visual: the real pointer never moves.
 final class GhostView: NSView {
+    /// What the pointer shows: the arrow while it travels, then a hand for presses or a text cursor for typing.
+    enum Kind: String { case arrow, hand, text }
     static let size = NSSize(width:190,height:68)
-    /// Where the arrow's tip sits in the view (flipped coordinates).
+    /// Where the pointer's hotspot sits in the view (flipped coordinates).
     static let tip = NSPoint(x:20,y:18)
-    static let arrowScale: CGFloat = 1.2
     var tint = NSColor.systemTeal
     var name = "Agent"
-    /// Set when an action lands on a control; drives the press dip and ripple.
+    var kind = Kind.arrow
+    /// Set when an action lands on a control; drives the press dip.
     var pulseUntil = Date.distantPast
     var tilt: CGFloat = 0
     override var isFlipped: Bool { true }
 
-    /// The arrow, tip at the origin, pointing up-left.
+    /// The arrow, hotspot at the origin, pointing up-left.
     static func arrow() -> NSBezierPath {
         let path = NSBezierPath()
         path.move(to:NSPoint(x:0,y:0))
@@ -368,45 +370,79 @@ final class GhostView: NSView {
         path.line(to:NSPoint(x:7.6,y:11.8))
         path.line(to:NSPoint(x:13.4,y:11.8))
         path.close()
-        path.lineJoinStyle = .round
         return path
+    }
+    /// A pointing hand, hotspot at the tip of the index finger.
+    static func hand() -> NSBezierPath {
+        let path = NSBezierPath()
+        func pill(_ rect: NSRect, _ radius: CGFloat) { path.append(NSBezierPath(roundedRect:rect,xRadius:radius,yRadius:radius)) }
+        pill(NSRect(x:-1.7,y:0,width:3.4,height:11),1.7)          // index finger
+        pill(NSRect(x:1.5,y:5.2,width:3.2,height:7),1.6)          // middle
+        pill(NSRect(x:4.5,y:6.2,width:3,height:6.6),1.5)          // ring
+        pill(NSRect(x:7.3,y:7.6,width:2.7,height:5.6),1.35)       // little finger
+        pill(NSRect(x:-1.7,y:9.4,width:11.7,height:8.6),3.6)      // palm
+        // The thumb, turned out from the side of the palm.
+        let turn = NSAffineTransform()
+        turn.translateX(by:-2.6,yBy:11.6)
+        turn.rotate(byDegrees:-42)
+        path.append(turn.transform(NSBezierPath(roundedRect:NSRect(x:-1.6,y:-3.6,width:3.2,height:7.2),xRadius:1.6,yRadius:1.6)))
+        return path
+    }
+    /// Gaps between the fingers, drawn in white over the hand.
+    static func knuckles() -> NSBezierPath {
+        let path = NSBezierPath()
+        for (x, top) in [(1.6, 7.6), (4.6, 8.4), (7.4, 9.6)] as [(CGFloat, CGFloat)] {
+            path.move(to:NSPoint(x:x,y:top)); path.line(to:NSPoint(x:x,y:11.6))
+        }
+        return path
+    }
+    /// A text cursor, hotspot at its centre.
+    static func beam() -> NSBezierPath {
+        let path = NSBezierPath()
+        path.append(NSBezierPath(roundedRect:NSRect(x:-0.8,y:-7.6,width:1.6,height:15.2),xRadius:0.8,yRadius:0.8))
+        path.append(NSBezierPath(roundedRect:NSRect(x:-3.4,y:-8.4,width:6.8,height:1.6),xRadius:0.8,yRadius:0.8))
+        path.append(NSBezierPath(roundedRect:NSRect(x:-3.4,y:6.8,width:6.8,height:1.6),xRadius:0.8,yRadius:0.8))
+        return path
+    }
+    static func glyph(_ kind: Kind) -> NSBezierPath {
+        switch kind { case .arrow: return arrow(); case .hand: return hand(); case .text: return beam() }
     }
 
     override func draw(_ dirtyRect: NSRect) {
         let tip = GhostView.tip
         let remaining = pulseUntil.timeIntervalSinceNow
         let press = remaining > 0 ? clamp01(CGFloat(1 - remaining / 0.6)) : 1
+        // A soft shadow, like the system pointer's.
         let shadow = NSShadow()
-        shadow.shadowOffset = NSSize(width:0,height:-1.5)
-        shadow.shadowBlurRadius = 4
-        shadow.shadowColor = NSColor.black.withAlphaComponent(0.32)
-
-        if press < 1 {
-            let radius = 4 + 17 * easeOut(press)
-            let ring = NSBezierPath(ovalIn:NSRect(x:tip.x - radius,y:tip.y - radius,width:radius * 2,height:radius * 2))
-            tint.withAlphaComponent(0.55 * (1 - press)).setStroke(); ring.lineWidth = 2; ring.stroke()
-            tint.withAlphaComponent(0.12 * (1 - press)).setFill(); ring.fill()
-        }
+        shadow.shadowOffset = NSSize(width:0,height:-1)
+        shadow.shadowBlurRadius = 2.5
+        shadow.shadowColor = NSColor.black.withAlphaComponent(0.22)
 
         NSGraphicsContext.saveGraphicsState()
-        // A touch larger than the system pointer so the agent's cursor reads as its own.
-        let scale = GhostView.arrowScale * (1 - 0.14 * sin(.pi * min(1, press / 0.45)))
         let transform = NSAffineTransform()
         transform.translateX(by:tip.x,yBy:tip.y)
-        transform.rotate(byDegrees:tilt)
-        transform.scale(by:scale)
+        // The arrow leans into its travel; the hand and text cursor stay upright.
+        if kind == .arrow { transform.rotate(byDegrees:tilt) }
+        // A small press, like a button giving way, when an action lands.
+        transform.scale(by:1 - 0.1 * sin(.pi * min(1, press / 0.45)))
         transform.concat()
-        let arrow = GhostView.arrow()
+        let glyph = GhostView.glyph(kind)
+        glyph.lineJoinStyle = .round
+        glyph.lineCapStyle = .round
+        // Black pointer with a white halo, so it reads on light and dark content alike.
         NSGraphicsContext.saveGraphicsState()
         shadow.set()
-        NSColor.white.setStroke(); arrow.lineWidth = 3.4; arrow.stroke()
-        NSColor.white.setFill(); arrow.fill()
+        NSColor.white.setStroke(); glyph.lineWidth = 2.6; glyph.stroke()
+        NSColor.white.setFill(); glyph.fill()
         NSGraphicsContext.restoreGraphicsState()
-        NSGradient(starting:tint.blended(withFraction:0.16,of:.white) ?? tint,ending:tint)?.draw(in:arrow,angle:90)
-        (tint.shadow(withLevel:0.28) ?? tint).withAlphaComponent(0.55).setStroke(); arrow.lineWidth = 0.6; arrow.stroke()
+        NSColor(srgbRed:0.04,green:0.04,blue:0.05,alpha:1).setFill(); glyph.fill()
+        if kind == .hand {
+            let gaps = GhostView.knuckles()
+            NSColor.white.withAlphaComponent(0.9).setStroke(); gaps.lineWidth = 0.8; gaps.lineCapStyle = .round; gaps.stroke()
+        }
         NSGraphicsContext.restoreGraphicsState()
 
-        // Name tag, tucked under the arrow's tail.
+        // Name tag in the agent's colour, clear of every pointer shape.
         let font = NSFont.systemFont(ofSize:11,weight:.semibold)
         let labelWidth = min(GhostView.size.width - tip.x - 14 - 8, textWidth(name,font) + 16)
         let tag = NSRect(x:tip.x + 14,y:tip.y + 24,width:labelWidth,height:19)

@@ -76,6 +76,22 @@ struct OverlayUITest {
                 try await Task.sleep(nanoseconds:120_000_000)
                 _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor-press.png"))
                 try check(overlay.ghostView.name == "Claude","The ghost cursor carries the agent's name tag")
+                // Presses show a hand and typing a text cursor, once the arrow reaches its target.
+                try check(ActivityOverlay.pointer(method:"click") == .hand && ActivityOverlay.pointer(method:"performAction",action:"AXPress") == .hand && ActivityOverlay.pointer(method:"performAction",action:"AXIncrement") == .arrow,"Presses point with a hand")
+                try check(ActivityOverlay.pointer(method:"typeText") == .text && ActivityOverlay.pointer(method:"pressKey",role:"AXTextArea") == .text && ActivityOverlay.pointer(method:"pressKey",role:"AXButton") == .arrow && ActivityOverlay.pointer(method:"scroll") == .arrow,"Typing shows a text cursor")
+                let fixtureWindow = (attribute(AXUIElementCreateApplication(target.processIdentifier),kAXWindowsAttribute) as? [AXUIElement])?.first
+                let control = fixtureWindow.flatMap { (attribute($0,kAXChildrenAttribute) as? [AXUIElement])?.first(where:{ elementFrame($0).map { $0.width > 8 && $0.height > 8 } == true }) }
+                guard let control else { throw Failure(code:"UI_TEST",message:"Fixture control missing") }
+                overlay.track(target,element:control,pointer:.hand,action:"Clicking Benchmark field")
+                try await waitUntil { overlay.ghostView.kind == .hand }
+                try check(overlay.ghostView.kind == .hand && overlay.ghost.isVisible,"The arrow becomes a hand when it reaches a control to press")
+                try await Task.sleep(nanoseconds:700_000_000)
+                _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor-hand.png"))
+                overlay.track(target,element:control,pointer:.text,action:"Typing into Benchmark field")
+                try await waitUntil { overlay.ghostView.kind == .text }
+                try check(overlay.ghostView.kind == .text,"Typing on the same control switches to a text cursor")
+                _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor-text.png"))
+                overlay.track(target,action:"Editing benchmark token")
                 pointer = NSPoint(x:overlay.panel.frame.midX,y:overlay.panel.frame.midY)
                 try await waitUntil { overlay.view.expanded && overlay.view.reveal >= 1 && overlay.panel.frame.width == ActivityView.cardWidth }
                 try check(overlay.view.expanded && overlay.panel.frame.width == ActivityView.cardWidth,"Hover expands activity details")

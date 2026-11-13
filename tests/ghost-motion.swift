@@ -11,7 +11,12 @@ import CoreGraphics
         motion.move(to:CGPoint(x:400,y:200),at:0.1)
         check(motion.position(at:0.1) == .zero,"Retarget starts at the displayed position")
         let middle = motion.position(at:0.1+motion.duration/2)!
-        check(abs(middle.x-200)<0.001 && abs(middle.y-100)<0.001,"Motion passes smoothly through its midpoint")
+        let bow = GhostMotion.bow(from:.zero,to:CGPoint(x:400,y:200))
+        check(abs(middle.x-(200+bow.x))<0.001 && abs(middle.y-(100+bow.y))<0.001,"Motion passes its midpoint on the arc")
+        check(bow.y > 0 && abs(hypot(bow.x,bow.y)-hypot(400,200)*0.09)<0.001,"The arc bows upward by 9% of the distance")
+        check(abs(bow.x*400+bow.y*200)<0.001,"The arc bows square to the line of travel")
+        let up = GhostMotion.bow(from:.zero,to:CGPoint(x:0,y:300)), across = GhostMotion.bow(from:.zero,to:CGPoint(x:-2000,y:0))
+        check(up.x < 0 && abs(up.y) < 0.001 && across.y == 36,"Vertical moves bow left; long moves bow at most 36 points")
         let landed = motion.position(at:0.1+motion.duration)!
         check(landed == CGPoint(x:400,y:200),"Cursor reaches the target without overshoot")
         check(!motion.isFloating(at:0.1+motion.duration+0.3),"Action holds before idle animation")

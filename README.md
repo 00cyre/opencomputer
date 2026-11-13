@@ -67,7 +67,7 @@ A small **three-dot glass pill** sits at the top right while an agent has an app
 
 ![Activity card from the live macOS UI test](docs/assets/activity-expanded.png)
 
-The ghost cursor wears the agent's colour and name tag, eases between targets, leans into its motion, and dips with a ripple when an action lands. It gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
+The ghost cursor looks like a real Mac pointer with the agent's name tag beside it. It glides between targets on a slight arc, becomes a hand when it presses something and a text cursor when it types. It gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
 
 ## Stay in charge
 

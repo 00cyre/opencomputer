@@ -637,7 +637,8 @@ final class Computer {
         default: try fail("UNKNOWN_METHOD", method)
         }
         try overlay.ensureNotPaused(app)
-        overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))")
+        let pointer = ActivityOverlay.pointer(method:method,action:request["action"] as? String,role:item.flatMap { attribute($0,kAXRoleAttribute) as? String })
+        overlay.track(app,element:item,pointer:pointer,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))")
         if let reason = approvalPolicy.reason(method:method,bundle:app.bundleIdentifier ?? "",label:item.map { label($0) },key:request["key"] as? String,action:request["action"] as? String) {
             try await approve(method,request,app:app,item:item,reason:reason)
         }
@@ -662,7 +663,7 @@ final class Computer {
         }
         // The person may have pressed Take over while the action waited.
         if overlay.paused { focus.cancel(); try overlay.ensureNotPaused(app) }
-        if wait > 0 { overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))") }
+        if wait > 0 { overlay.track(app,element:item,pointer:pointer,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))") }
         // The person may have switched tabs or pages while the action waited for a pause.
         do {
             if let resolved { try resolved.snapshot.verify(resolved.index) }

@@ -60,7 +60,7 @@ jobs:
           path: work/overlay-ui
       - name: Commit refreshed screenshots
         run: |
-          for name in activity-collapsed activity-expanded activity-paused activity-approval ghost-cursor; do
+          for name in activity-collapsed activity-expanded activity-paused activity-approval ghost-cursor ghost-cursor-hand ghost-cursor-text; do
             cp "work/overlay-ui/dark/$name.png" "docs/assets/$name.png"
           done
           git add docs/assets/*.png
