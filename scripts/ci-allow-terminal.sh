@@ -12,12 +12,16 @@ for SERVICE in kTCCServiceAccessibility kTCCServiceScreenCapture kTCCServicePost
 done
 sudo sqlite3 "$DB" "SELECT service, auth_value FROM access WHERE client = 'com.apple.Terminal';" || true
 # macOS 15 and later also ask, in a dialog that stays on screen, before an app captures the
-# screen without the system picker. A future date for Terminal here answers that question.
-APPROVALS="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals"
+# screen without the system picker. A future date under Terminal's executable here may answer
+# it ahead of time (the key format has changed between releases). Whatever still comes up is
+# answered by work/ci-capture-alert, which scripts/record-demo.sh runs before recording.
+APPROVALS="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals.plist"
+echo "Screen capture approvals before:"; plutil -p "$APPROVALS" 2>/dev/null || echo "  (none)"
 mkdir -p "$(dirname "$APPROVALS")"
-for KEY in /System/Applications/Utilities/Terminal.app com.apple.Terminal; do
-  defaults write "$APPROVALS" "$KEY" -date "2099-01-01 00:00:00 +0000" || echo "Could not pre-approve screen capture for $KEY."
-done
+defaults write "$APPROVALS" /System/Applications/Utilities/Terminal.app/Contents/MacOS/Terminal -date "2099-01-01 00:00:00 +0000" \
+  || echo "Could not pre-approve screen capture for Terminal."
 killall replayd 2>/dev/null || true
+mkdir -p work
+swiftc -O -o work/ci-capture-alert scripts/ci-capture-alert.swift || echo "Could not build the screen capture answerer."
 sw_vers -productVersion
 exit 0
