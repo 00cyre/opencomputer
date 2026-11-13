@@ -2,7 +2,7 @@
 
 ## 0.5.0 — 2026-11-13
 
-Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app.
+Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app. Agents also get a Chrome of their own, and the activity indicator lets the person take over or approve what matters.
 
 ### See, stop, and approve
 
@@ -35,6 +35,17 @@ The activity indicator now shows what the agent has been doing and lets you stop
 - `screenshot` takes `maxEdge` (200–4000, default 1600) to make pictures smaller. Menu shortcuts now read with `cmd` first (`cmd+shift+s`), as `pressKey` takes them.
 - JavaScript: `getAXState({refresh})`, `getScreenshot(windowId, {marks, region, ocr, maxEdge})`, `readText`, `waitFor`, `chooseMenu`, `verify`, and `pressKey(key, {via: 'menu'})`; `apps` accepts `:read` and `:click` entries. `ComputerError` moved to `src/errors.mjs` and is still exported from `src/computer.mjs`.
 - `npm run test:perception` exercises these on the fixture, which gains an optional menu bar. The helper now links the Vision framework.
+
+### Agents browse in their own Chrome
+
+Agents get a Chrome of their own, apart from the person's.
+
+- **`agent-browser`.** A second Google Chrome instance with its own profile folder (`~/Library/Application Support/OpenComputer/AgentBrowser`, or `OPENCOMPUTER_AGENT_PROFILE`). `open` with `app: "agent-browser"` starts it in the background, or opens the link as a new tab inside it, so agent pages never land in the person's windows and the person's tab switches never move an agent's target. It is launched so that it keeps painting, running timers, and exposing page content while covered, behind other windows, or behind a fullscreen app. New tabs are made through its own accessibility tree and keys posted to its process, so Chrome has no reason to come forward. Sign-ins are its own: sign in once in that window per site.
+- **`com.google.Chrome` means the person's Chrome.** Without an explicit `pid` it never resolves to the agent browser, which `apps` lists as `agent-browser`. Allowing `com.google.Chrome` does not allow the agent browser; `*` or `agent-browser` does.
+- **Fullscreen apps are left alone.** While the app in front is fullscreen or draws a display-sized window (games), `open` on the agent browser refuses with `USER_BUSY` (`reason: "fullscreen-app"`) instead of starting Chrome or opening a tab, because either can bring Chrome over it for a moment. Existing agent tabs still work: navigate one with `setValue` on its address bar and `pressKey` Return.
+- **Screenshots when ScreenCaptureKit stalls.** When ScreenCaptureKit does not answer within 6 s (seen for every window while a fullscreen game ran), the window is taken with the system `screencapture` tool instead for the next two minutes. Results carry `captureTool: "screencapture"`; `clickPoint` works the same on them. `marks`, `ocr`, and `maxEdge` work there too; `region` returns the whole window with `regionIgnored: true`. `OPENCOMPUTER_CAPTURE=screencapture` forces that path.
+
+Known limit: starting the agent browser, or making it a new window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Start it once and keep one agent tab open.
 
 Validation: the helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side; the live overlay UI test passes on a GitHub macOS runner; the live fixture test has not yet been run on a Mac.
 

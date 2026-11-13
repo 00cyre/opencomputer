@@ -96,6 +96,9 @@ final class Computer {
     }
     func permit(_ request: [String: Any], method: String) throws -> String {
         let bundle = try string(request, "app")
+        // The agent browser is a separate Chrome instance with its own profile, allowed as
+        // agent-browser or by *; allowing com.google.Chrome alone does not reach it, and it
+        // does not reach the person's Chrome.
         let level = access(bundle)
         if level == "none" { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
         // Launching is allowed at every level; opening a link changes what the app shows.
@@ -120,7 +123,14 @@ final class Computer {
     }
     func target(_ request: [String: Any]) throws -> NSRunningApplication {
         let bundle = try permit(request, method: request["method"] as? String ?? "")
-        let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
+        if bundle == AgentBrowser.name {
+            guard let agent = AgentBrowser.running() else { try fail("APP_NOT_RUNNING", "The agent browser is not running. Call open with app agent-browser (and a url) to start it in the background.") }
+            if let pid = request["pid"] as? Int, pid != Int(agent.processIdentifier) { try fail("APP_NOT_RUNNING", "The agent browser runs as pid \(agent.processIdentifier), not \(pid).") }
+            return agent
+        }
+        var apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
+        // Without an explicit pid, Google Chrome means the person's Chrome, never the agent browser.
+        if bundle == AgentBrowser.bundle, request["pid"] == nil { apps = apps.filter { !AgentBrowser.isAgent($0) } }
         if let pid = request["pid"] as? Int {
             guard let app = apps.first(where: { Int($0.processIdentifier) == pid }) else { try fail("APP_NOT_RUNNING", "No running instance of \(bundle) has pid \(pid). Call apps for current pids.") }
             return app
@@ -364,7 +374,15 @@ final class Computer {
     }
     func screenshot(_ app: NSRunningApplication, _ request: [String: Any]) async throws -> [String: Any] {
         guard CGPreflightScreenCaptureAccess() else { try fail("SCREEN_RECORDING_REQUIRED", "Allow Screen Recording for the launching host in System Settings, then restart it.") }
-        let content = try await captureDeadline { try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) }
+        // ScreenCaptureKit can stop answering (seen while a fullscreen game owns the display).
+        // Then the system screencapture tool takes the window instead, for a while.
+        if Date() < captureKitBlockedUntil || ProcessInfo.processInfo.environment["OPENCOMPUTER_CAPTURE"] == "screencapture" { return try await screenshotWithTool(app, request) }
+        let content: SCShareableContent
+        do { content = try await captureDeadline(seconds:6) { try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) } }
+        catch let error as Failure where error.code == "CAPTURE_TIMEOUT" {
+            captureKitBlockedUntil = Date().addingTimeInterval(120)
+            return try await screenshotWithTool(app, request)
+        }
         let windows = content.windows.filter { $0.owningApplication?.processID == app.processIdentifier && $0.windowLayer == 0 && $0.frame.width > 1 && $0.frame.height > 1 }
         guard !windows.isEmpty else { try fail("NO_WINDOW", "No capturable window for this app. Restore a window and try again.") }
         // region zooms into the window of the most recent screenshot, in that picture's pixels.
@@ -413,21 +431,18 @@ final class Computer {
         config.width = max(1, Int(source.width * scale))
         config.height = max(1, Int(source.height * scale))
         config.showsCursor = false
-        let cgImage = try await captureDeadline { try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) }
-        var extra: [String:Any] = [:]
-        if zoom != nil { extra["zoomed"] = true }
-        if request["ocr"] as? Bool == true { extra["lines"] = try recognizeText(cgImage) }
-        var picture = cgImage
-        if request["marks"] as? Bool == true {
-            let crop = CGRect(x:window.frame.minX+source.minX,y:window.frame.minY+source.minY,width:source.width,height:source.height)
-            if let snapshot = snapshots[app.processIdentifier], Date().timeIntervalSince(snapshot.time) < 300 {
-                let marks = self.marks(snapshot,window:window.frame,crop:crop,scale:scale)
-                if let drawn = annotate(cgImage,marks:marks) { picture = drawn; extra["marked"] = marks.count }
-            } else {
-                extra["marked"] = 0
-                extra["marksNote"] = "Observe this app first: marks label the elements of its latest snapshot."
-            }
+        let cgImage: CGImage
+        do { cgImage = try await captureDeadline(seconds:6) { try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) } }
+        catch let error as Failure where error.code == "CAPTURE_TIMEOUT" {
+            captureKitBlockedUntil = Date().addingTimeInterval(120)
+            var forward = request
+            forward["windowId"] = window.windowID
+            return try await screenshotWithTool(app, forward)
         }
+        let crop = CGRect(x:window.frame.minX+source.minX,y:window.frame.minY+source.minY,width:source.width,height:source.height)
+        let (picture, decorations) = try decorate(cgImage, app, request, window:window.frame, crop:crop, scale:scale)
+        var extra = decorations
+        if zoom != nil { extra["zoomed"] = true }
         let bitmap = NSBitmapImageRep(cgImage: picture)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
         // The page at the window's centre identifies which tab the picture shows.
@@ -441,6 +456,23 @@ final class Computer {
         captures[app.processIdentifier] = capture
         let result: [String:Any] = ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "scale": scale, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
         return result.merging(extra) { a, _ in a }
+    }
+    // OCR text and element marks for a captured picture; crop is the captured rectangle in
+    // screen points and scale the picture's pixels per point.
+    func decorate(_ image: CGImage, _ app: NSRunningApplication, _ request: [String:Any], window: CGRect, crop: CGRect, scale: CGFloat) throws -> (CGImage, [String:Any]) {
+        var extra: [String:Any] = [:]
+        if request["ocr"] as? Bool == true { extra["lines"] = try recognizeText(image) }
+        var picture = image
+        if request["marks"] as? Bool == true {
+            if let snapshot = snapshots[app.processIdentifier], Date().timeIntervalSince(snapshot.time) < 300 {
+                let marks = self.marks(snapshot,window:window,crop:crop,scale:scale)
+                if let drawn = annotate(image,marks:marks) { picture = drawn; extra["marked"] = marks.count }
+            } else {
+                extra["marked"] = 0
+                extra["marksNote"] = "Observe this app first: marks label the elements of its latest snapshot."
+            }
+        }
+        return (picture, extra)
     }
     // Boxes, in screenshot pixels, of the snapshot's pressable and editable elements that
     // are inside the captured window and region. Window-sized containers are left out.
@@ -478,6 +510,68 @@ final class Computer {
         overlay.track(app,element:element,action:"Reading \(label(element))")
         return ["text":whole.substring(with:range),"offset":range.location,"length":range.length,"totalLength":whole.length,
                 "more":range.location+range.length < whole.length || partial,"source":source]
+    }
+    var captureKitBlockedUntil = Date.distantPast
+    /// The same capture through /usr/sbin/screencapture, scoped to one window of this app.
+    func screenshotWithTool(_ app: NSRunningApplication, _ request: [String: Any]) async throws -> [String: Any] {
+        let list = (CGWindowListCopyWindowInfo([.optionAll], kCGNullWindowID) as? [[String: Any]]) ?? []
+        let windows: [(id: CGWindowID, title: String, bounds: CGRect, onScreen: Bool)] = list.compactMap { info in
+            guard (info[kCGWindowOwnerPID as String] as? Int32) == app.processIdentifier, (info[kCGWindowLayer as String] as? Int) == 0,
+                  let id = info[kCGWindowNumber as String] as? CGWindowID, let raw = info[kCGWindowBounds as String] as? NSDictionary,
+                  let bounds = CGRect(dictionaryRepresentation: raw as CFDictionary), bounds.width > 1, bounds.height > 1 else { return nil }
+            return (id, info[kCGWindowName as String] as? String ?? "", bounds, (info[kCGWindowIsOnscreen as String] as? Bool) ?? false)
+        }
+        guard !windows.isEmpty else { try fail("NO_WINDOW", "No capturable window for this app. Restore a window and try again.") }
+        let window: (id: CGWindowID, title: String, bounds: CGRect, onScreen: Bool)
+        if let id = (request["windowId"] as? NSNumber)?.uint32Value {
+            guard let selected = windows.first(where: { $0.id == id }) else { try fail("INVALID_WINDOW", "windowId must belong to the allowed app.") }
+            window = selected
+        } else {
+            let visible = windows.filter { $0.onScreen && $0.bounds.height > 40 }
+            let candidates = visible.isEmpty ? windows : visible
+            guard candidates.count == 1 else {
+                return ["selectionRequired": true, "windows": candidates.map { ["windowId": $0.id, "title": $0.title, "onScreen": $0.onScreen] as [String: Any] }]
+            }
+            window = candidates[0]
+        }
+        overlay.track(app,title:window.title,captureWindowID:window.id,captureFrame:window.bounds,action:"Capturing window")
+        note?.merge(["window":cleanLabel(window.title,limit:160),"captureTool":"screencapture"])
+        let file = (NSTemporaryDirectory() as NSString).appendingPathComponent("opencomputer-\(getpid())-\(UUID().uuidString).png")
+        defer { try? FileManager.default.removeItem(atPath: file) }
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+        process.arguments = ["-x", "-o", "-t", "png", "-l\(window.id)", file]
+        process.standardOutput = FileHandle.nullDevice
+        process.standardError = FileHandle.nullDevice
+        try process.run()
+        let deadline = Date().addingTimeInterval(10)
+        while process.isRunning, Date() < deadline { try? await Task.sleep(nanoseconds: 50_000_000) }
+        if process.isRunning { process.terminate(); try fail("CAPTURE_TIMEOUT", "Neither ScreenCaptureKit nor screencapture answered in time.") }
+        guard let source = CGImageSourceCreateWithURL(URL(fileURLWithPath: file) as CFURL, nil), let full = CGImageSourceCreateImageAtIndex(source, 0, nil) else {
+            try fail("CAPTURE_FAILED", "screencapture produced no image for this window.")
+        }
+        let edge = CGFloat(min(4000, max(200, request["maxEdge"] as? Int ?? 1600)))
+        let scale = min(1, edge / max(window.bounds.width, window.bounds.height))
+        let width = max(1, Int(window.bounds.width * scale)), height = max(1, Int(window.bounds.height * scale))
+        guard let context = CGContext(data: nil, width: width, height: height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpaceCreateDeviceRGB(), bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue) else { try fail("CAPTURE_FAILED", "Could not scale the screenshot.") }
+        context.interpolationQuality = .high
+        context.draw(full, in: CGRect(x: 0, y: 0, width: width, height: height))
+        guard let cgImage = context.makeImage() else { try fail("CAPTURE_FAILED", "Could not scale the screenshot.") }
+        // region is not supported on this path: the whole window is returned and later regions use its pixels.
+        let (picture, decorations) = try decorate(cgImage, app, request, window:window.bounds, crop:window.bounds, scale:scale)
+        var extra = decorations
+        if request["region"] != nil { extra["regionIgnored"] = true }
+        guard let png = NSBitmapImageRep(cgImage: picture).representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
+        var capture = Capture(window:window.id,scale:scale,title:window.title,size:window.bounds.size)
+        var hit: AXUIElement?
+        if AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(window.bounds.midX),Float(window.bounds.midY),&hit) == .success, let hit,
+           let frame = owningWindow(hit).flatMap({ elementFrame($0) }), abs(frame.minX-window.bounds.minX) <= 3, abs(frame.minY-window.bounds.minY) <= 3,
+           let page = webArea(hit) {
+            capture.page = page; capture.url = pageURL(page)
+        }
+        captures[app.processIdentifier] = capture
+        let result: [String:Any] = ["mimeType": "image/png", "data": png.base64EncodedString(), "width": width, "height": height, "scale": scale, "windowId": window.id, "app": app.bundleIdentifier ?? "", "captureTool": "screencapture"]
+        return result.merging(extra) { a, _ in a }
     }
     // Screenshot pixel -> the element this app has there. The hit test is scoped to the
     // app, so windows of other apps on top of it do not matter and are never read.
@@ -571,8 +665,48 @@ final class Computer {
         try? await Task.sleep(nanoseconds:60_000_000)
         return true
     }
+    func openAgentBrowser(_ request: [String:Any]) async throws -> [String:Any] {
+        var url: URL?
+        if let raw = request["url"] as? String {
+            guard let parsed = URL(string:raw), ["http","https","file"].contains(parsed.scheme?.lowercased() ?? "") else { try fail("INVALID_ARGUMENT","url must be an http, https, or file URL.") }
+            url = parsed
+        }
+        // Only the address bar of an existing agent tab is safe while a fullscreen app is in
+        // front: launching, new tabs, and new windows can bring Chrome over it.
+        if let front = AgentBrowser.fullscreenInFront(), AgentBrowser.running() == nil || url != nil {
+            throw Failure(code:"USER_BUSY",message:"\(front) is fullscreen in front. The agent browser does not start or open tabs then, because Chrome could come over it. Navigate an existing agent tab with setValue on its address bar and pressKey Return, or retry later.",
+                          details:["reason":"fullscreen-app","app":front,"retryAfterMs":60000,"dispatched":false])
+        }
+        let before = focus.begin(target:nil)
+        do {
+            var launched = false, via = "launch"
+            let app: NSRunningApplication
+            if let running = AgentBrowser.running() {
+                app = running
+                focus.expect(app.processIdentifier)
+                if let url {
+                    if await AgentBrowser.openTabInPlace(app, url) { via = "new-tab" } else { try AgentBrowser.openTab(url); via = "handoff" }
+                }
+                await AgentBrowser.waitForWindow(app, seconds: 5)
+            } else {
+                app = try await AgentBrowser.launch(url)
+                launched = true
+                focus.expect(app.processIdentifier)
+                await AgentBrowser.waitForWindow(app)
+            }
+            let outcome = await focus.finish(settleMs:400)
+            overlay.track(app,action:url == nil ? "Opening agent browser" : "Opening link")
+            return ["opened":true,"app":AgentBrowser.name,"pid":app.processIdentifier,"launched":launched,"via":url == nil ? "none" : via,"profile":AgentBrowser.profile,
+                    "frontmostBefore":before.bundle,"frontmostAfter":outcome.after,"focusChanged":outcome.changed,"focusRestored":outcome.restored]
+        } catch let error as Failure { focus.cancel(); throw error }
+        catch { focus.cancel(); try fail("OPEN_FAILED","Could not open the agent browser: \(error.localizedDescription)") }
+    }
     func open(_ request: [String:Any]) async throws -> [String:Any] {
         let bundle = try permit(request, method: "open")
+        if bundle == AgentBrowser.name {
+            try overlay.ensureNotPaused(AgentBrowser.running())
+            return try await openAgentBrowser(request)
+        }
         try overlay.ensureNotPaused(NSRunningApplication.runningApplications(withBundleIdentifier:bundle).first)
         guard let location = NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { try fail("APP_NOT_FOUND","No installed app has bundle ID \(bundle).") }
         let config = NSWorkspace.OpenConfiguration()
@@ -662,8 +796,12 @@ final class Computer {
             tally = [:]; touched = []
             return ["released":true, "summary":summary, "actionLog":log.path ?? NSNull()]
         case "apps":
-            let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
-                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "frontmost": $0.isActive, "hidden": $0.isHidden, "allowed": access($0.bundleIdentifier ?? "") != "none", "access": access($0.bundleIdentifier ?? "")] as [String: Any]
+            let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map { app -> [String: Any] in
+                // The agent browser is listed under its own name: act on it with app "agent-browser".
+                if AgentBrowser.isAgent(app) {
+                    return ["name": "Agent browser (Google Chrome)", "bundleId": AgentBrowser.name, "pid": app.processIdentifier, "frontmost": app.isActive, "hidden": app.isHidden, "allowed": access(AgentBrowser.name) != "none", "access": access(AgentBrowser.name)]
+                }
+                return ["name": app.localizedName ?? "", "bundleId": app.bundleIdentifier ?? "", "pid": app.processIdentifier, "frontmost": app.isActive, "hidden": app.isHidden, "allowed": access(app.bundleIdentifier ?? "") != "none", "access": access(app.bundleIdentifier ?? "")]
             }
             return ["apps": apps.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }]
         case "open": return try await open(request)

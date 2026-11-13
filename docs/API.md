@@ -48,6 +48,17 @@ Append `:click` for click-only access: `click`, `clickPoint`, `performAction`, `
 
 `apps: ['*']` explicitly enables all running apps. Each request still names one bundle ID, and snapshots, captures, and actions remain scoped to its process. The default is no app access. This uses the apps and logged-in sessions on the current Mac; it creates no VM and copies no credentials.
 
+## The agent browser
+
+`app: "agent-browser"` names a second Google Chrome instance with its own profile folder (`~/Library/Application Support/OpenComputer/AgentBrowser`; `OPENCOMPUTER_AGENT_PROFILE` moves it). Agents browse there instead of in the person's Chrome:
+
+- `open({app: "agent-browser", url})` starts it in the background, or opens the link as a new tab in its window. The result carries `launched`, `via` (`launch`, `new-tab`, or `handoff`), and `profile`.
+- It runs with occluded-window and renderer backgrounding turned off and the page accessibility tree always on, so it keeps working while covered or behind a fullscreen app.
+- Every other method takes `app: "agent-browser"` like any app, and `agent-browser:read` or `agent-browser:click` limit it like any other entry. `com.google.Chrome` without a `pid` always means the person's Chrome, and `apps` lists the agent instance as `agent-browser`.
+- It has its own cookies and sign-ins. Sign in once per site in its window; agents never type passwords (`SECURE_FIELD`).
+- While a fullscreen app is in front, `open` on it refuses with `USER_BUSY` and `details.reason: "fullscreen-app"`. Navigate an existing agent tab through its address bar instead.
+- Starting it, or making a window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Keep one agent tab open.
+
 ## Observing
 
 A snapshot contains `snapshot`, `app`, `pid`, `nodes`, `windows`, `truncated`, `elapsedMs`, and `frontmostApp`. Nodes have `id`, `role`, `parent`, available labels/values, `enabled`, `settable`, supported `actions`, and a `frame` in macOS global accessibility coordinates.
@@ -167,6 +178,8 @@ Chromium and Electron apps build their accessibility tree on demand. The first o
 Recognition runs on the Mac; neither recognized text nor pixels are logged or stored.
 
 `maxEdge` (200–4000, default 1600) caps the picture's long side in pixels. A whole window is captured at one pixel per point at most, so `maxEdge` mainly makes pictures smaller, which costs fewer tokens.
+
+When ScreenCaptureKit does not answer within 6 s, the window is taken with the system `screencapture` tool for the next two minutes and the result carries `captureTool: "screencapture"`. `marks`, `ocr`, and `maxEdge` work the same there; `region` is not supported on that path, so the whole window comes back with `regionIgnored: true`. `OPENCOMPUTER_CAPTURE=screencapture` forces that path.
 
 ## Acting without the pointer or the foreground
 
