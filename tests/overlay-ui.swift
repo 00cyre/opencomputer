@@ -103,8 +103,8 @@ struct OverlayUITest {
 
                 // An approval question opens the card by itself and waits for Allow or Deny.
                 let key = "click-send"
-                let first = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"OpenComputer Fixture · “Send” looks like it can’t be undone",wait:0.5)
-                try check(first == .waiting && overlay.view.approval != nil,"Unanswered approval keeps waiting")
+                let unanswered = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"OpenComputer Fixture · “Send” looks like it can’t be undone",wait:0.5)
+                try check(unanswered == .waiting && overlay.view.approval != nil,"Unanswered approval keeps waiting")
                 try await Task.sleep(nanoseconds:450_000_000)
                 try check(overlay.view.expanded && overlay.view.buttons == [.deny,.allow] && !overlay.panel.ignoresMouseEvents,"Approval opens the card with Deny and Allow")
                 // Allow counts only after a held press, and is never offered to assistive apps.
@@ -121,8 +121,8 @@ struct OverlayUITest {
                 try await Task.sleep(nanoseconds:450_000_000)
                 _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-approval.png"))
                 overlay.press(.allow)
-                let second = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"",wait:0.5)
-                try check(second == .approved,"Allow approves the waiting action once")
+                let clicked = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"",wait:0.5)
+                try check(clicked == .approved,"Allow approves the waiting action once")
                 try await Task.sleep(nanoseconds:700_000_000)
                 try check(!overlay.view.expanded,"The card closes once answered")
                 overlay.release()
