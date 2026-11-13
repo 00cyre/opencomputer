@@ -61,7 +61,18 @@ Ask your agent to inspect a disposable TextEdit document. Have it read the curre
 
 > **Developer runtime:** the native helper is ad-hoc signed, not Apple-notarized. macOS may block downloaded binaries. Follow the normal macOS approval flow or [build from source](docs/DEVELOPMENT.md); OpenComputer never disables Gatekeeper. This release is a developer runtime, not a graphical installer.
 
-[Checksums](https://github.com/00cyre/opencomputer/releases/download/v0.3.0/SHA256SUMS.txt) · [Claude and Grok setup](docs/INSTALL.md) · [Release notes](CHANGELOG.md)
+[Checksums](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/SHA256SUMS.txt) · [Claude and Grok setup](docs/INSTALL.md) · [Release notes](CHANGELOG.md)
+
+## What it asks for, and why
+
+| Needs | Why |
+| :--- | :--- |
+| **Accessibility** | To read an allowed app's controls and press them. |
+| **Screen Recording** | To capture the one window the agent asks for. Nothing else on screen is captured, and screenshots are not stored. |
+| **Network** | None. The server opens no listener and sends no telemetry. |
+| **Files it writes** | A redacted action log per session in `~/Library/Logs/OpenComputer` (typed text is recorded as a length only), a copy of the helper in `~/Library/Application Support/OpenComputer/helper/`, and a small per-user temporary record so several agents' indicators can stack. |
+
+To check a download, compare `shasum -a 256 OpenComputer-0.5.0-macOS.zip` with its line in [SHA256SUMS.txt](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/SHA256SUMS.txt). Or skip the download: `npm run build` compiles the helper from the Swift files in `native/`, with no npm dependencies.
 
 ## See what your agent is doing
 
@@ -129,6 +140,22 @@ The app allowlist is a process-level control, not a sandbox against an agent tha
 
 Both installed clients completed the native fixture task through OpenComputer 0.3.0: fill a field, enable an option, submit once, verify, capture a window, and release the indicators. Claude used 11 tool calls and Grok 14, with zero errors in their completed benchmark runs. Both preserved focus. Earlier Grok activity pauses and a turn-limit interruption are recorded alongside the passes. [Results, methodology, and limitations](docs/BENCHMARKS.md).
 
+## FAQ
+
+**Can I keep using my Mac while the agent works?** Yes. Work in other apps and other windows never blocks it. In the window it is acting on, an action waits a moment for you to pause and otherwise returns `USER_BUSY` with nothing sent.
+
+**Which agents does it work with?** Any MCP client that runs local stdio servers, plus the JavaScript API. Claude Code and Grok Build are covered by the [benchmark](docs/BENCHMARKS.md).
+
+**How is this different from screenshot-and-mouse agents?** Those drive the real pointer and keyboard, so the computer is theirs while they work. OpenComputer reads apps through the accessibility API and acts on controls directly, in the background. The trade-off: it cannot drag, hover, right-click, or click inside canvas-drawn apps.
+
+**And from other background computer-use projects?** Several cover more ground, such as Windows and Linux, or background pointer events through private macOS APIs. OpenComputer uses public APIs only, never sends synthetic mouse events, and focuses on sharing one desktop with a person: same-window waits, refusing actions when the page changed, default-deny access, and a visible card with Take over and approvals.
+
+**Is it safe to let an agent use my apps?** You choose the apps; the default is none. Entries can be read-only or click-only, sensitive actions can wait for your on-screen approval, Take over pauses everything, and every session leaves a hash-chained log. The allowlist is not a sandbox against an agent that can already run shell commands. [Security model](SECURITY.md).
+
+**Why isn't the helper notarized?** Notarization needs a paid Apple Developer ID. Until then the release is ad-hoc signed, with checksums, and you can build it from source.
+
+**Windows or Linux?** No. OpenComputer is built on macOS accessibility and ScreenCaptureKit.
+
 ## Build, test, contribute
 
 ```sh
@@ -143,7 +170,7 @@ npm run test:focus         # foreground restoration + two-window work
 npm run test:interaction   # deterministic activity-conflict scenarios
 ```
 
-[Developer guide](docs/DEVELOPMENT.md) · [Test coverage](docs/TESTING.md) · [Reproduce the AI benchmark](docs/BENCHMARKS.md) · [Report an issue](https://github.com/00cyre/opencomputer/issues)
+[Contributing](CONTRIBUTING.md) · [Developer guide](docs/DEVELOPMENT.md) · [Test coverage](docs/TESTING.md) · [Reproduce the AI benchmark](docs/BENCHMARKS.md) · [Report an issue](https://github.com/00cyre/opencomputer/issues)
 
 ---
 
