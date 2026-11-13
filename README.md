@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="OpenComputer — let your agent work. Keep your desktop." width="100%"></p>
 
-<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.3.0/OpenComputer-0.3.0-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
+<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.5.1/OpenComputer-0.5.1-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
 
 <p align="center"><a href="#watch-it-work">Watch demo</a> · <a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
 
@@ -23,13 +23,15 @@ A 27-second showcase with narration, sound effects, and music. Click the preview
 
 Actual native UI with choreographed demo actions. [Recording details](docs/SHOWCASE.md).
 
+**New in 0.5.0:** [watch the feature tour](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-demo.mp4), recorded unedited on a GitHub macOS runner by the release workflow. An agent fills in and submits a background app while the terminal keeps the foreground, checks its own results, asks before a sensitive press, is stopped with **Take over**, and is refused in the terminal it runs in. The script is [`scripts/demo.mjs`](scripts/demo.mjs).
+
 ## Background control, visible activity
 
 Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chatgpt.com/docs/computer-use). This is an independent implementation using public macOS APIs. It is **not a drop-in replacement for OpenAI's private runtime**, and it does not provide ChatGPT's approval system or locked-Mac access.
 
 | For your agent | For your desktop |
 | :--- | :--- |
-| Fourteen MCP tools with explicit input schemas. | Exact app allowlists, or explicit all-app access on your own Mac. |
+| Nineteen MCP tools with explicit input schemas. | Exact app allowlists, read-only apps, or explicit all-app access on your own Mac. |
 | Compact outlines with element IDs that stay valid across actions. | Clicks are accessibility presses; keys go to the target process only. Your pointer never moves. |
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
 | Native actions with verification metadata. | An app that brings itself forward is sent back; your foreground app is restored. |
@@ -39,7 +41,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 
 **macOS 14+ · Node.js 22+ · Apple Silicon or Intel**
 
-1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.3.0/OpenComputer-0.3.0-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
+1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.5.1/OpenComputer-0.5.1-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
 2. In that folder, run `node bin/opencomputer.mjs doctor`. Approve Accessibility and Screen Recording for the launching host in **System Settings → Privacy & Security**, then restart that host if needed. [Permission help](docs/INSTALL.md#macos-permissions).
 3. Add the MCP server to your agent using its documented configuration. Start with one app you intend to automate:
 
@@ -55,7 +57,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 }
 ```
 
-Ask your agent to inspect a disposable TextEdit document. Have it read the current state before each action and check the result afterward. **Empty allowlist means no app access.** Use `node bin/opencomputer.mjs apps` to find bundle IDs. Set `OPENCOMPUTER_APPS` to `*` for explicit access to all running apps and their existing sessions; no VM or browser-profile copying.
+Ask your agent to inspect a disposable TextEdit document. Have it read the current state before each action and check the result afterward. **Empty allowlist means no app access.** Use `node bin/opencomputer.mjs apps` to find bundle IDs. Set `OPENCOMPUTER_APPS` to `*` for explicit access to all running apps and their existing sessions; no VM or browser-profile copying. Add `:read` to an entry (`com.apple.Mail:read`, or `*:read`) to let the agent look but not act, or `:click` to let it click and scroll but not type.
 
 > **Developer runtime:** the native helper is ad-hoc signed, not Apple-notarized. macOS may block downloaded binaries. Follow the normal macOS approval flow or [build from source](docs/DEVELOPMENT.md); OpenComputer never disables Gatekeeper. This release is a developer runtime, not a graphical installer.
 
@@ -108,6 +110,11 @@ Element IDs stay valid across actions until the next full observe of that app; o
 - **Fast reads:** batched attribute reads return a typical thousand-element window in well under a second, as a compact outline with `query` search.
 - **Activity and focus protection:** hover-to-open activity card with a step timeline, visible-target ghost cursor, window-aware interaction checks, and foreground restoration when an app activates itself.
 - **Take over and approvals:** pause any agent from the card, and approve sends, payments, posts, and deletes before they happen.
+- **Act and verify in one call:** once an app has been observed, every action waits for the app to settle on its own accessibility notifications and returns only what changed (`+` added, `-` removed, `~` changed), with the same element IDs, and says when the app reported no change at all. Pass `expect` (or call `verify`) to get a plain `confirmed`, `deviation`, or `unverifiable`. `waitFor` waits for an element to appear or go away instead of polling.
+- **See what the outline can't:** screenshots can label every control with its element ID (`marks`), zoom into a region at full display resolution (`region`), and read text from pixels with on-device Vision OCR (`ocr`), with or without the picture.
+- **Fewer round trips:** `menu` runs a command by path (`File > Export as PDF…`), `pressKey` with `via: "menu"` runs a shortcut through its menu item when a background app ignores keys, `readText` returns a page or document as plain text, and `batch` runs a known sequence of steps in one call. Errors say whether retrying is safe and what to call next.
+- **Access levels:** `bundle:read` entries allow observing and screenshots but refuse every action, and `bundle:click` allows clicks and scrolling but no typing or keys, so an agent can read Mail while acting only in the app you chose. `*` never covers the app the agent itself runs in, so it cannot approve its own prompts.
+- **An audit trail you can check:** every session writes a redacted, hash-chained action log; `opencomputer log --summary` shows what each session did and `--verify` checks that no line was edited out.
 - **Any agent:** each MCP client runs its own server, so several agents can work at once.
 
 **Not implemented:** hover, drag, right-click, pixel-exact clicks on canvases, browser DOM automation, Windows/Linux, and locked-screen operation. Canvas-only controls, minimized windows, secure fields, and apps with incomplete accessibility support may not work. Keys reach the target app's own focused control, and some apps ignore keys while in the background. An app can still bring itself forward for a moment before the foreground is handed back; public macOS APIs cannot prevent that. Each agent host needs its own Accessibility and Screen Recording approval. [Compatibility and acceptance checks](docs/TESTING.md).

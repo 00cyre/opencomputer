@@ -15,6 +15,11 @@ enum Keys {
         "f1":122,"f2":120,"f3":99,"f4":118,"f5":96,"f6":97,"f7":98,"f8":100,"f9":101,"f10":109,"f11":103,"f12":111,
         "plus":24,"minus":27,
     ]
+    // Names for keys a menu shortcut gives by key code rather than by character.
+    static let names: [CGKeyCode: String] = [
+        36:"Return",48:"Tab",49:"Space",51:"Delete",53:"Escape",117:"ForwardDelete",115:"Home",119:"End",116:"PageUp",121:"PageDown",
+        123:"Left",124:"Right",125:"Down",126:"Up",122:"F1",120:"F2",99:"F3",118:"F4",96:"F5",97:"F6",98:"F7",100:"F8",101:"F9",109:"F10",103:"F11",111:"F12",
+    ]
     static let modifiers: [String: CGEventFlags] = [
         "cmd":.maskCommand,"command":.maskCommand,"meta":.maskCommand,"ctrl":.maskControl,"control":.maskControl,
         "alt":.maskAlternate,"option":.maskAlternate,"opt":.maskAlternate,"shift":.maskShift,"fn":.maskSecondaryFn,

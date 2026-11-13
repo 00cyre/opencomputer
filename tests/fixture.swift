@@ -8,6 +8,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
     let output = ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_OUTPUT"] ?? "/tmp/opencomputer-fixture.json"
     var submissions = 0
     var returns = 0
+    var stamps = 0
     var cover: NSWindow?
     var otherWindow: NSWindow?
     // Browser-like tabs: the window title follows the selected tab. SIGUSR1 switches tabs
@@ -94,9 +95,24 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
                 source.resume(); signals.append(source)
             }
         }
+        // A menu bar with a shortcut, for menu paths and shortcut discovery.
+        if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_MENU"] == "1" {
+            let bar = NSMenu()
+            let appItem = NSMenuItem(); appItem.submenu = NSMenu(title:"Fixture"); bar.addItem(appItem)
+            let tools = NSMenuItem(title:"Tools",action:nil,keyEquivalent:"")
+            let menu = NSMenu(title:"Tools")
+            let stamp = NSMenuItem(title:"Stamp Document…",action:#selector(stampDocument),keyEquivalent:"k")
+            stamp.keyEquivalentModifierMask = [.command,.shift]
+            stamp.target = self
+            menu.addItem(stamp)
+            tools.submenu = menu
+            bar.addItem(tools)
+            NSApp.mainMenu = bar
+        }
         window.orderFrontRegardless()
         save()
     }
+    @objc func stampDocument() { stamps += 1; status.stringValue = "Stamped \(stamps)"; save() }
     func switchTab(rename: Bool) {
         guard let tabs else { return }
         retitle = rename
@@ -137,7 +153,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
         save()
     }
     func save() {
-        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"presses":presses,"tab":tabs?.selectedTabViewItem?.label ?? "","title":window?.title ?? "","frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
+        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"stamps":stamps,"presses":presses,"tab":tabs?.selectedTabViewItem?.label ?? "","title":window?.title ?? "","frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
         if let data = try? JSONSerialization.data(withJSONObject:state, options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:URL(fileURLWithPath:output), options:.atomic) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication) -> Bool { true }

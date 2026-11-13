@@ -101,3 +101,18 @@ test('the server connection starts a new helper after a timeout', async()=>{
     assert.equal(c.restarts,1);
   } finally { c.close(); }
 });
+test('read-only entries are accepted and new app methods reach the helper', async()=>{
+  const c=new Computer({executable,apps:['com.apple.Mail:read','*:read','cc.test']});
+  try {
+    assert.throws(()=>new Computer({executable,apps:['cc.test:write']}),TypeError);
+    const app=c.getApp('cc.test');
+    await assert.rejects(app.readText(1),{code:'OBSERVE_REQUIRED'});
+    await app.getAXState();
+    const text=await app.readText(2,{offset:10,length:5});
+    assert.deepEqual([text.method,text.element,text.offset,text.length,text.snapshot],['readText',2,10,5,'snapshot-1']);
+    const refreshed=await app.getAXState({refresh:true});
+    assert.deepEqual([refreshed.refresh,refreshed.snapshot],[true,'snapshot-1']);
+    const shot=await app.getScreenshot(undefined,{marks:true,region:{x:1,y:2,width:3,height:4}});
+    assert.deepEqual([shot.marks,shot.region.width],[true,3]);
+  } finally {c.close();}
+});
