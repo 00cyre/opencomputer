@@ -125,11 +125,24 @@ An action waits up to `waitMs` (default 2000, at most 10000; `OPENCOMPUTER_WAIT_
 
 Some apps bring themselves forward when a control is pressed. The helper watches for an activation the person did not cause — no click, modifier, or key from them — and hands the foreground back to the app they were in. The result then carries `focusChanged: true` and `focusRestored: true`, and the session stays usable. Late self-activations are undone for 1.5 s after the action returns. A switch the person makes themselves is left alone. This is correction after the fact: a self-activating app can flash forward for a moment, and public macOS APIs cannot prevent that.
 
+### Take over and approvals
+
+The person can stop an agent and approve its consequential actions from the activity card ([details](ACTIVITY.md#take-over)). Both are decided before the activity check and before anything is sent:
+
+| Error | Meaning | What the agent should do |
+| --- | --- | --- |
+| `PAUSED_BY_USER` | The person pressed **Take over**. Actions and `open` are refused until they press **Resume**; observe and screenshot still work. | Stop acting. Tell the person in chat, and observe again after they resume. |
+| `APPROVAL_PENDING` | `OPENCOMPUTER_CONFIRM` covers this action and the person has not answered yet (`details.retryAfterMs`). The question stays on screen. | Say in chat what you are waiting for, then retry the same call. It runs once after **Allow**. |
+| `APPROVAL_DENIED` | The person pressed **Deny**. | Do not retry. Ask how to proceed. |
+| `APPROVAL_UNAVAILABLE` | Approval is required but `OPENCOMPUTER_OVERLAY=0` hides the card. | Report it; the person must change the configuration. |
+
+All four carry `details.dispatched: false`. `OPENCOMPUTER_CONFIRM` takes `sensitive` (presses on controls labelled Send, Pay, Delete and similar, plus Return, Enter and cmd+Delete), bundle IDs (every action in that app), or `all`, combined with commas. `status().approvals` reports the active rules. An approval wait is capped so the request finishes inside the JavaScript client's default 20-second timeout; a client configured with a shorter `timeoutMs` should keep `OPENCOMPUTER_CONFIRM` off or raise it.
+
 The check and the dispatch are not atomic, and input silence does not prove the person stopped reading. Browser tabs are part of their window; there is no per-tab ownership, but an action never lands on a tab or page other than the one it observed (see [changed targets](#changed-targets)).
 
 ## Activity state
 
-Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, and helper window IDs/geometry for diagnostics. See [activity behavior](ACTIVITY.md).
+Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, `paused`, `approvalPending`, `steps` (timeline length), `controlsInteractive` (the open card is taking clicks for its buttons), and helper window IDs/geometry for diagnostics. `clickThrough` is false only while the person has the card open. See [activity behavior](ACTIVITY.md).
 
 ## MCP
 

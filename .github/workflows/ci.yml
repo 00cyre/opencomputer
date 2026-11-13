@@ -34,4 +34,6 @@ jobs:
         if: matrix.arch == 'arm64'
       - run: npm run test:approval
         if: matrix.arch == 'arm64'
+      - run: bash scripts/test-ui.sh --compile-only
+        if: matrix.arch == 'arm64'
       - run: npm run fixture:build

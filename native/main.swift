@@ -449,6 +449,9 @@ final class Computer {
     }
     /// Waits for the person's answer on the activity card before an action OPENCOMPUTER_CONFIRM covers.
     func approve(_ method: String, _ request: [String:Any], app: NSRunningApplication, item: AXUIElement?, reason: String) async throws {
+        guard overlay.enabled else {
+            throw Failure(code:"APPROVAL_UNAVAILABLE",message:"OPENCOMPUTER_CONFIRM asks the person before this action, but OPENCOMPUTER_OVERLAY=0 hides the indicator where they answer. Nothing was dispatched. Ask the person to enable the overlay or change OPENCOMPUTER_CONFIRM.",details:["dispatched":false])
+        }
         let name = item.map { label($0) } ?? ""
         let what: String
         switch method {
