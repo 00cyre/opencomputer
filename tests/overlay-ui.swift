@@ -17,6 +17,12 @@ struct OverlayUITest {
     static func main() {
         let app = NSApplication.shared
         app.setActivationPolicy(.accessory)
+        // Screenshots for both system appearances: OPENCOMPUTER_UI_APPEARANCE=dark or light.
+        switch ProcessInfo.processInfo.environment["OPENCOMPUTER_UI_APPEARANCE"] {
+        case "dark": app.appearance = NSAppearance(named:.darkAqua)
+        case "light": app.appearance = NSAppearance(named:.aqua)
+        default: break
+        }
         var pointer = NSPoint(x:-10000,y:-10000)
         // The production hover branch receives pointer positions without moving the user's cursor.
         let overlay = ActivityOverlay(pointer:{pointer})
@@ -44,7 +50,13 @@ struct OverlayUITest {
                 guard let target = target else { throw Failure(code:"UI_TEST",message:"Fixture launch failed") }
                 try check(AXIsProcessTrusted(),"Accessibility unavailable")
                 overlay.configure("Claude")
+                overlay.track(target,action:"Reading window")
+                overlay.track(target,action:"Clicking Benchmark field")
                 overlay.track(target,action:"Editing benchmark token")
+                try check(overlay.view.steps.map { $0.text } == ["Reading window","Clicking Benchmark field","Editing benchmark token"],"Each new action becomes a step")
+                try check(overlay.view.steps.dropLast().allSatisfy { $0.state == .done } && overlay.view.steps.last?.state == .running,"Earlier steps finish when a new one starts")
+                overlay.track(target,action:"Editing benchmark token")
+                try check(overlay.view.steps.count == 3,"Repeating the current action adds no step")
                 try await Task.sleep(nanoseconds:250_000_000)
                 try check(overlay.panel.isVisible && !overlay.view.expanded,"Activity begins collapsed")
                 let first = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-collapsed.png"))
@@ -52,19 +64,55 @@ struct OverlayUITest {
                 let second = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-animation-frame.png"))
                 try check(first != second,"Animation changes the rendered dot pixels")
                 try check(overlay.ghost.isVisible,"Ghost visible over exposed fixture")
+                try await Task.sleep(nanoseconds:700_000_000)
                 _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor.png"))
+                overlay.ghostView.pulseUntil = Date().addingTimeInterval(0.6)
+                try await Task.sleep(nanoseconds:120_000_000)
+                _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor-press.png"))
+                try check(overlay.ghostView.name == "Claude","The ghost cursor carries the agent's name tag")
                 pointer = NSPoint(x:overlay.panel.frame.midX,y:overlay.panel.frame.midY)
-                try await Task.sleep(nanoseconds:250_000_000)
-                try check(overlay.view.expanded && overlay.panel.frame.width == 380,"Hover expands activity details")
+                try await Task.sleep(nanoseconds:450_000_000)
+                try check(overlay.view.expanded && overlay.panel.frame.width == ActivityView.cardWidth,"Hover expands activity details")
+                try check(overlay.panel.frame.height == overlay.view.expandedHeight,"The card fits its three steps")
                 try check(overlay.view.agent.name == "Claude" && overlay.view.appName == "OpenComputer Fixture","Expanded details identify the right agent and app")
                 try check(overlay.view.windowTitle == "OpenComputer Test Fixture","Expanded details include the target window title")
                 try check(!overlay.panel.canBecomeKey && !overlay.panel.canBecomeMain && !overlay.panel.isKeyWindow && !overlay.panel.isMainWindow,"Expanded panel cannot own focus")
-                try check(overlay.panel.ignoresMouseEvents && overlay.ghost.ignoresMouseEvents,"Both annotations remain click-through during hover")
+                try check(!overlay.panel.ignoresMouseEvents && overlay.ghost.ignoresMouseEvents,"The open card takes clicks for its buttons; the ghost never does")
                 try check(NSWorkspace.shared.frontmostApplication?.processIdentifier != getpid(),"Overlay process never becomes foreground")
                 _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-expanded.png"))
+                guard let takeOver = overlay.view.buttonFrames().first(where:{ $0.0 == .takeOver })?.1 else { throw Failure(code:"UI_TEST",message:"Take over button missing") }
+                pointer = NSPoint(x:overlay.panel.frame.minX + takeOver.midX,y:overlay.panel.frame.maxY - takeOver.midY)
+                try await Task.sleep(nanoseconds:100_000_000)
+                try check(overlay.view.hovered == .takeOver,"Hovering Take over highlights it")
+
+                // Take over pauses the session until Resume; the agent's actions are refused meanwhile.
+                overlay.press(.takeOver)
+                try check(overlay.paused && overlay.view.buttons == [.resume],"Take over pauses and offers Resume")
+                var refused = ""
+                do { try overlay.ensureNotPaused(target) } catch let error as Failure { refused = error.code }
+                try check(refused == "PAUSED_BY_USER","Actions are refused while the person has control")
+                try await Task.sleep(nanoseconds:150_000_000)
+                _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-paused.png"))
+                overlay.press(.resume)
+                try check(!overlay.paused && overlay.view.buttons == [.takeOver],"Resume hands control back")
+
                 pointer = NSPoint(x:-10000,y:-10000)
-                try await Task.sleep(nanoseconds:350_000_000)
-                try check(!overlay.view.expanded && overlay.panel.frame.width == 54,"Leaving the pill collapses it")
+                try await Task.sleep(nanoseconds:700_000_000)
+                try check(!overlay.view.expanded && overlay.panel.frame.width == ActivityView.pillWidth,"Leaving the pill collapses it")
+                try check(overlay.panel.ignoresMouseEvents,"Collapsed dots pass clicks through")
+
+                // An approval question opens the card by itself and waits for Allow or Deny.
+                let key = "click-send"
+                let first = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"OpenComputer Fixture · “Send” looks like it can’t be undone",wait:0.5)
+                try check(first == .waiting && overlay.view.approval != nil,"Unanswered approval keeps waiting")
+                try await Task.sleep(nanoseconds:450_000_000)
+                try check(overlay.view.expanded && overlay.view.buttons == [.deny,.allow] && !overlay.panel.ignoresMouseEvents,"Approval opens the card with Deny and Allow")
+                _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-approval.png"))
+                overlay.press(.allow)
+                let second = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"",wait:0.5)
+                try check(second == .approved,"Allow approves the waiting action once")
+                try await Task.sleep(nanoseconds:700_000_000)
+                try check(!overlay.view.expanded,"The card closes once answered")
                 overlay.release()
                 try check(!overlay.panel.isVisible && !overlay.ghost.isVisible,"Release removes all UI")
                 print("{\"passed\":\(checks),\"hoverExpanded\":true,\"dotsAnimated\":true,\"focusPreserved\":true}")
