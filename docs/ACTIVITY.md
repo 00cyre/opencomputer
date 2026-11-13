@@ -48,7 +48,9 @@ Label matching is a heuristic, not an understanding of intent: a button named "G
 
 ## Ghost cursor
 
-![Ghost cursor](assets/ghost-cursor.png)
+| Travelling | Pressing | Typing |
+| --- | --- | --- |
+| ![Arrow](assets/ghost-cursor.png) | ![Hand](assets/ghost-cursor-hand.png) | ![Text cursor](assets/ghost-cursor-text.png) |
 
 The pointer is drawn like the system's: black with a white halo and a soft shadow, so it reads on light and dark content, with the agent's name tag in its colour beside it. It marks the last targeted control, or a point near the window’s upper left during observation. It travels as an arrow and changes shape when it arrives: a hand for clicks and presses (with a small press as the action lands), a text cursor for typing and keys into text fields. It eases between targets over 220–500 ms with zero starting/ending velocity, along a slight upward arc (9% of the distance at most, 36 points at most) rather than a ruler-straight line, and the arrow leans a little into horizontal travel. After a brief pause it gently floats by up to 2.4 points vertically and 0.65 points horizontally, with a 2.4-second vertical cycle. These are visual offsets; the real pointer stays untouched. It follows the target window and appears only where that window is exposed. Covering that point, minimizing/hiding the window, or moving it offscreen hides the pointer. It reappears when the target is visible again. Accessibility hit-testing checks only the owner/window identity of the point; it does not read covering apps’ contents.
 

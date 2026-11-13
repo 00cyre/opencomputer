@@ -13,7 +13,8 @@ import CoreGraphics
         let middle = motion.position(at:0.1+motion.duration/2)!
         let bow = GhostMotion.bow(from:.zero,to:CGPoint(x:400,y:200))
         check(abs(middle.x-(200+bow.x))<0.001 && abs(middle.y-(100+bow.y))<0.001,"Motion passes its midpoint on the arc")
-        check(bow.y > 0 && abs(hypot(bow.x,bow.y)-hypot(400,200)*0.09)<0.001,"The arc bows upward by 9% of the distance")
+        let short = GhostMotion.bow(from:.zero,to:CGPoint(x:200,y:100))
+        check(short.y > 0 && abs(hypot(short.x,short.y)-hypot(200,100)*0.09)<0.001,"The arc bows upward by 9% of the distance")
         check(abs(bow.x*400+bow.y*200)<0.001,"The arc bows square to the line of travel")
         let up = GhostMotion.bow(from:.zero,to:CGPoint(x:0,y:300)), across = GhostMotion.bow(from:.zero,to:CGPoint(x:-2000,y:0))
         check(up.x < 0 && abs(up.y) < 0.001 && across.y == 36,"Vertical moves bow left; long moves bow at most 36 points")
