@@ -54,6 +54,8 @@ jobs:
           node bin/opencomputer.mjs doctor
           npm run test:perception
           npm run test:integration
+      - name: Let Terminal run the demo (this runner only)
+        run: bash scripts/ci-allow-terminal.sh
       - name: Record the demo
         run: bash scripts/record-demo.sh work/demo
       - name: Publish
