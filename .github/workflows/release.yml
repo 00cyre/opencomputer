@@ -1,0 +1,81 @@
+name: Release
+# Publishes the GitHub release for the version in package.json: builds the universal helper
+# and the runtime and source ZIPs, runs the unit and live tests, records the demo on the
+# runner's desktop, and creates tag v<version> on this commit with the ZIPs, SHA256SUMS.txt
+# and the demo video. Notes come from .github/release-notes/<version>.md (first line is the
+# title). Run it by hand on main. "video only" re-records the demo and replaces the video on
+# a release that already exists, leaving its ZIPs and checksums alone.
+on:
+  workflow_dispatch:
+    inputs:
+      video_only:
+        description: Re-record the demo and replace the video on the existing release
+        type: boolean
+        default: false
+permissions:
+  contents: write
+concurrency:
+  group: release
+  cancel-in-progress: false
+jobs:
+  release:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    env:
+      GH_TOKEN: ${{ github.token }}
+      VIDEO_ONLY: ${{ inputs.video_only }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - name: Version and notes
+        id: version
+        run: |
+          VERSION="$(node -p 'require("./package.json").version')"
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          test -s ".github/release-notes/$VERSION.md" || { echo "Missing .github/release-notes/$VERSION.md"; exit 1; }
+          if gh release view "v$VERSION" >/dev/null 2>&1; then
+            [ "$VIDEO_ONLY" = true ] || { echo "v$VERSION is already released. Bump the version, or run with video only."; exit 1; }
+          else
+            [ "$VIDEO_ONLY" != true ] || { echo "v$VERSION has no release to replace the video on."; exit 1; }
+          fi
+      - run: npm test
+      - run: npm run check
+      - name: Package the runtime and source ZIPs
+        if: env.VIDEO_ONLY != 'true'
+        run: npm run package
+      - name: Build the helper
+        if: env.VIDEO_ONLY == 'true'
+        run: npm run build
+      - run: npm run fixture:build
+      - name: Live tests
+        run: |
+          node bin/opencomputer.mjs doctor
+          npm run test:perception
+          npm run test:integration
+      - name: Record the demo
+        run: bash scripts/record-demo.sh work/demo
+      - name: Publish
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          test -s work/demo/opencomputer-demo.mp4 || { echo "No demo video was recorded."; exit 1; }
+          mkdir -p dist
+          cp work/demo/opencomputer-demo.mp4 "dist/OpenComputer-$VERSION-demo.mp4"
+          if [ "$VIDEO_ONLY" = true ]; then
+            gh release upload "v$VERSION" "dist/OpenComputer-$VERSION-demo.mp4" --clobber
+          else
+            NOTES=".github/release-notes/$VERSION.md"
+            tail -n +2 "$NOTES" > work/notes.md
+            gh release create "v$VERSION" --target "$GITHUB_SHA" --title "$(head -n 1 "$NOTES" | sed 's/^# *//')" --notes-file work/notes.md \
+              "dist/OpenComputer-$VERSION-macOS.zip" "dist/OpenComputer-$VERSION-source.zip" dist/SHA256SUMS.txt "dist/OpenComputer-$VERSION-demo.mp4"
+          fi
+          gh release view "v$VERSION" --json url,assets --jq '.url, (.assets[] | "\(.name) \(.size)")'
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: release-${{ steps.version.outputs.version }}
+          path: |
+            dist
+            work/demo
+          if-no-files-found: warn

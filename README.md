@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="OpenComputer — let your agent work. Keep your desktop." width="100%"></p>
 
-<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.3.0/OpenComputer-0.3.0-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
+<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
 
 <p align="center"><a href="#watch-it-work">Watch demo</a> · <a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
 
@@ -23,13 +23,15 @@ A 27-second showcase with narration, sound effects, and music. Click the preview
 
 Actual native UI with choreographed demo actions. [Recording details](docs/SHOWCASE.md).
 
+**New in 0.5.0:** [watch the feature tour](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-demo.mp4), recorded unedited on a GitHub macOS runner by the release workflow. An agent fills in and submits a background app while the terminal keeps the foreground, checks its own results, asks before a sensitive press, is stopped with **Take over**, and is refused in the terminal it runs in. The script is [`scripts/demo.mjs`](scripts/demo.mjs).
+
 ## Background control, visible activity
 
 Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chatgpt.com/docs/computer-use). This is an independent implementation using public macOS APIs. It is **not a drop-in replacement for OpenAI's private runtime**, and it does not provide ChatGPT's approval system or locked-Mac access.
 
 | For your agent | For your desktop |
 | :--- | :--- |
-| Eighteen MCP tools with explicit input schemas. | Exact app allowlists, read-only apps, or explicit all-app access on your own Mac. |
+| Nineteen MCP tools with explicit input schemas. | Exact app allowlists, read-only apps, or explicit all-app access on your own Mac. |
 | Compact outlines with element IDs that stay valid across actions. | Clicks are accessibility presses; keys go to the target process only. Your pointer never moves. |
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
 | Native actions with verification metadata. | An app that brings itself forward is sent back; your foreground app is restored. |
@@ -39,7 +41,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 
 **macOS 14+ · Node.js 22+ · Apple Silicon or Intel**
 
-1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.3.0/OpenComputer-0.3.0-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
+1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
 2. In that folder, run `node bin/opencomputer.mjs doctor`. Approve Accessibility and Screen Recording for the launching host in **System Settings → Privacy & Security**, then restart that host if needed. [Permission help](docs/INSTALL.md#macos-permissions).
 3. Add the MCP server to your agent using its documented configuration. Start with one app you intend to automate:
 

@@ -380,6 +380,13 @@ final class ActivityOverlay {
          "paused":paused,"approvalPending":approvals.pending != nil,"steps":view.steps.count,"controlsInteractive":!panel.ignoresMouseEvents,
          "clickThrough":panel.ignoresMouseEvents && ghost.ignoresMouseEvents,
          "pillWindowId":panel.windowNumber,"ghostWindowId":ghost.windowNumber,
-         "pillFrame":["screenY":(NSScreen.screens.first?.frame.maxY ?? 0)-panel.frame.maxY,"x":panel.frame.minX,"y":panel.frame.minY,"width":panel.frame.width,"height":panel.frame.height]]
+         "pillFrame":["screenY":(NSScreen.screens.first?.frame.maxY ?? 0)-panel.frame.maxY,"x":panel.frame.minX,"y":panel.frame.minY,"width":panel.frame.width,"height":panel.frame.height],
+         "buttons":buttonCenters()]
+    }
+    /// Centers of the open card's buttons in screen points from the top left, for tests and the demo.
+    func buttonCenters() -> [[String:Any]] {
+        guard view.expanded, view.reveal > 0.9 else { return [] }
+        let top = (NSScreen.screens.first?.frame.maxY ?? 0) - panel.frame.maxY
+        return view.buttonFrames().map { ["title":$0.0.title,"x":panel.frame.minX + $0.1.midX,"y":top + $0.1.midY] }
     }
 }

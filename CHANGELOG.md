@@ -47,7 +47,13 @@ Agents get a Chrome of their own, apart from the person's.
 
 Known limit: starting the agent browser, or making it a new window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Start it once and keep one agent tab open.
 
-Validation: the helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side; the live overlay UI test passes on a GitHub macOS runner; the live fixture test has not yet been run on a Mac.
+### Demo and release
+
+- `npm run demo` is a narrated tour of these features on the fixture, including an unanswered approval question and the person pressing **Take over** and **Resume** (the demo moves the real pointer for that step; OpenComputer itself never does). `scripts/record-demo.sh` runs it in its own Terminal window and records the screen.
+- `status().activity.buttons` gives the open card's buttons with their screen positions.
+- New workflows: "Live tests and demo" runs the live fixture suites on a GitHub macOS runner and records the demo; "Release" builds the ZIPs, runs the unit and live tests, records the demo, and publishes the GitHub release with the video.
+
+Validation: on a GitHub macOS runner (macos-latest), `npm run test:perception` (25 assertions) and `npm run test:integration` (19) pass, the live overlay UI test passes, and the demo runs end to end; the release workflow repeats them before publishing. The helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side. The agent browser is not covered by the runner tests.
 
 ## 0.4.4 — 2026-11-12
 

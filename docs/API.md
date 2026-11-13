@@ -240,7 +240,7 @@ The check and the dispatch are not atomic, and input silence does not prove the 
 
 ## Activity state
 
-Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, `paused`, `approvalPending`, `steps` (timeline length), `controlsInteractive` (the open card is taking clicks for its buttons), and helper window IDs/geometry for diagnostics. `clickThrough` is false only while the person has the card open. See [activity behavior](ACTIVITY.md).
+Observation, capture, and actions update the indicators. `status().activity` contains `enabled`, `active`, `agent`, `app`, `action`, `windowTitle`, `pillVisible`, `expanded`, `ghostVisible`, `ghostFloating`, `ghostReason`, `stackRow`, `nonActivating`, `clickThrough`, `paused`, `approvalPending`, `steps` (timeline length), `controlsInteractive` (the open card is taking clicks for its buttons), `buttons` (while the card is open, each button's `title` and center `x`/`y` in screen points from the top left), and helper window IDs/geometry for diagnostics. `clickThrough` is false only while the person has the card open. See [activity behavior](ACTIVITY.md).
 
 ## MCP
 
