@@ -4,6 +4,18 @@
 
 Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app.
 
+### See, stop, and approve
+
+The activity indicator now shows what the agent has been doing and lets you stop it or approve what matters.
+
+- **Activity card.** The three dots sit in a glass pill and open on hover into a card that grows out of them: the app's icon badged with the agent, "Claude is using Notes", the window title, elapsed time, and the last three steps as a timeline (current step pulsing, earlier ones checked, failures crossed out with a reason). It follows light and dark mode, and stacked sessions make room for an open card.
+- **Take over.** A button on the card pauses the session. Actions and `open` answer `PAUSED_BY_USER` with nothing sent until you press **Resume**; observing still works. Resuming drops earlier snapshots so the agent looks again. The pause outlives `release`.
+- **Approvals (`OPENCOMPUTER_CONFIRM`).** `sensitive` asks before presses on controls labelled Send, Pay, Delete, Post and similar, and before Return, Enter and cmd+Delete; a bundle ID asks before every action in that app; `all` asks before everything. The card opens with **Deny** / **Hold to allow**: Allow counts only after a half-second held press and is never offered to assistive or automation tools. Unanswered requests return `APPROVAL_PENDING` and run once when retried after Allow; **Deny** returns `APPROVAL_DENIED`. Approved actions are marked in the action log. `status().approvals` shows the rules.
+- **Ghost cursor.** Redrawn with a white outline, soft shadow, colour gradient and the agent's name tag. It leans into horizontal travel and dips with a ripple when an action lands.
+- `npm run test:approval` covers the approval rules and question lifecycle; CI also compiles the UI harness, and a new "Overlay screenshots" workflow runs the live UI test on a GitHub macOS runner and can commit refreshed screenshots to `docs/assets`.
+
+### Actions that check themselves
+
 - **`changes` on observe and every action.** The server re-reads the app's last scope into the same snapshot and returns only what was added (`+`), removed (`-`), or reads differently (`~`, with what it was). IDs stay valid, so one call acts and verifies. Built on the helper's new `observe` `refresh` mode, which keeps element IDs across re-reads.
 - **`waitFor`.** Re-reads about three times a second until an element matches a query, or with `gone` until none does, then returns the matches with usable IDs, or `WAIT_TIMEOUT`.
 - **Screenshot `marks`, `region`, and `ocr`.** Marks draw the latest snapshot's element IDs on the picture. A region zooms into the previous screenshot at up to display density, and `clickPoint` follows the zoomed picture. OCR returns Vision text lines with pixel boxes; MCP `image: false` returns the text alone.
@@ -24,7 +36,7 @@ Ideas from other computer-use projects, rebuilt for background control on the Ma
 - JavaScript: `getAXState({refresh})`, `getScreenshot(windowId, {marks, region, ocr, maxEdge})`, `readText`, `waitFor`, `chooseMenu`, `verify`, and `pressKey(key, {via: 'menu'})`; `apps` accepts `:read` and `:click` entries. `ComputerError` moved to `src/errors.mjs` and is still exported from `src/computer.mjs`.
 - `npm run test:perception` exercises these on the fixture, which gains an optional menu bar. The helper now links the Vision framework.
 
-Validation: the helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side; the live fixture test has not yet been run on a Mac.
+Validation: the helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side; the live overlay UI test passes on a GitHub macOS runner; the live fixture test has not yet been run on a Mac.
 
 ## 0.4.4 — 2026-11-12
 
