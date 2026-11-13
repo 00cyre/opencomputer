@@ -11,4 +11,13 @@ for SERVICE in kTCCServiceAccessibility kTCCServiceScreenCapture kTCCServicePost
     || echo "Could not allow $SERVICE for Terminal."
 done
 sudo sqlite3 "$DB" "SELECT service, auth_value FROM access WHERE client = 'com.apple.Terminal';" || true
+# macOS 15 and later also ask, in a dialog that stays on screen, before an app captures the
+# screen without the system picker. A future date for Terminal here answers that question.
+APPROVALS="$HOME/Library/Group Containers/group.com.apple.replayd/ScreenCaptureApprovals"
+mkdir -p "$(dirname "$APPROVALS")"
+for KEY in /System/Applications/Utilities/Terminal.app com.apple.Terminal; do
+  defaults write "$APPROVALS" "$KEY" -date "2099-01-01 00:00:00 +0000" || echo "Could not pre-approve screen capture for $KEY."
+done
+killall replayd 2>/dev/null || true
+sw_vers -productVersion
 exit 0
