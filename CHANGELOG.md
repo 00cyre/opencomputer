@@ -1,14 +1,59 @@
 # Changelog
 
-## Unreleased — activity card, Take over, approvals, new cursor
+## 0.5.0 — 2026-11-13
 
-You can now see what the agent has been doing, stop it, and approve what matters, from the indicator itself.
+Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app. Agents also get a Chrome of their own, and the activity indicator lets the person take over or approve what matters.
+
+### See, stop, and approve
+
+The activity indicator now shows what the agent has been doing and lets you stop it or approve what matters.
 
 - **Activity card.** The three dots sit in a glass pill and open on hover into a card that grows out of them: the app's icon badged with the agent, "Claude is using Notes", the window title, elapsed time, and the last three steps as a timeline (current step pulsing, earlier ones checked, failures crossed out with a reason). It follows light and dark mode, and stacked sessions make room for an open card.
 - **Take over.** A button on the card pauses the session. Actions and `open` answer `PAUSED_BY_USER` with nothing sent until you press **Resume**; observing still works. Resuming drops earlier snapshots so the agent looks again. The pause outlives `release`.
 - **Approvals (`OPENCOMPUTER_CONFIRM`).** `sensitive` asks before presses on controls labelled Send, Pay, Delete, Post and similar, and before Return, Enter and cmd+Delete; a bundle ID asks before every action in that app; `all` asks before everything. The card opens with **Deny** / **Hold to allow**: Allow counts only after a half-second held press and is never offered to assistive or automation tools. Unanswered requests return `APPROVAL_PENDING` and run once when retried after Allow; **Deny** returns `APPROVAL_DENIED`. Approved actions are marked in the action log. `status().approvals` shows the rules.
 - **Ghost cursor.** Redrawn with a white outline, soft shadow, colour gradient and the agent's name tag. It leans into horizontal travel and dips with a ripple when an action lands.
 - `npm run test:approval` covers the approval rules and question lifecycle; CI also compiles the UI harness, and a new "Overlay screenshots" workflow runs the live UI test on a GitHub macOS runner and can commit refreshed screenshots to `docs/assets`.
+
+### Actions that check themselves
+
+- **`changes` on observe and every action.** The server re-reads the app's last scope into the same snapshot and returns only what was added (`+`), removed (`-`), or reads differently (`~`, with what it was). IDs stay valid, so one call acts and verifies. Built on the helper's new `observe` `refresh` mode, which keeps element IDs across re-reads.
+- **`waitFor`.** Re-reads about three times a second until an element matches a query, or with `gone` until none does, then returns the matches with usable IDs, or `WAIT_TIMEOUT`.
+- **Screenshot `marks`, `region`, and `ocr`.** Marks draw the latest snapshot's element IDs on the picture. A region zooms into the previous screenshot at up to display density, and `clickPoint` follows the zoomed picture. OCR returns Vision text lines with pixel boxes; MCP `image: false` returns the text alone.
+- **`readText`.** An element's full value, or a container's text in reading order, in pages of up to 100,000 UTF-16 units.
+- **`menu`.** Runs a menu bar command by path, such as `File > Export as PDF…`, without opening the menu. Menu items now report their keyboard shortcut (`keys:cmd+shift+s`).
+- **`batch`.** Up to 20 tool calls in one request, all validated first, stopping at the first error.
+- **Read-only apps.** `OPENCOMPUTER_APPS` entries ending in `:read`, including `*:read`, allow observing, screenshots, and reading but refuse actions and URLs with `READ_ONLY_APP`. An explicit `bundle:read` entry overrides `*`.
+- **Settle on the app's own notifications.** From its first observe of an app the helper listens to that app's accessibility notifications, keeping only counts. After an action the server waits until the app goes quiet (200 ms of silence, at most 1.5 s) instead of a fixed 300 ms, and the diff says how many notifications arrived. So "no change" now tells apart an action with no effect (the app reported nothing) from one whose effect the outline cannot show.
+- **Diffs by default.** Once an app has been observed, actions return what changed without asking; `changes: false` skips it. `batch` compares only after its last action. A default comparison never replaces the agent's snapshot: when the old one is gone it says so instead.
+- **`expect` and `verify`.** Actions and batch steps take conditions (`element` or `query`, `value`, `valueContains`, `enabled`, `selected`, `focused`, `windowTitle`, `exists`), re-read until they hold or `expectMs` passes, and report `confirmed`, `deviation`, or `unverifiable`. A deviation stops a batch with `EXPECTATION_FAILED`. The read-only `verify` tool checks the same conditions without acting.
+- **`pressKey` via `"menu"`.** Presses the menu bar item that has the shortcut, which apps in the background honour more reliably than keys. A shortcut that changed nothing suggests it.
+- **Dialogs and focus.** Outlines flag an open sheet or dialog at the top; diffs name the focused element.
+- **Error advice.** Every MCP error carries `retrySafe`, and often `next` (the call most likely to help) and `hint`.
+- **Click-only apps.** `bundle:click` and `*:click` allow clicks and scrolling, and refuse text, values, keys, and URLs with `CLICK_ONLY_APP`.
+- **The agent's own app is protected.** Under `*`, the apps above the helper in its process chain (the terminal, editor, or chat app running the agent) are read-only and refuse actions with `HOST_APP_PROTECTED`, unless listed by name. `status` reports them as `protectedHosts`.
+- **Session summary and a checkable log.** `release` returns what the session did (actions sent, refused, failed, apps). Action log lines carry a hash of the line before; `opencomputer log --verify` checks the chain and `opencomputer log --summary` prints one line per session.
+- `screenshot` takes `maxEdge` (200–4000, default 1600) to make pictures smaller. Menu shortcuts now read with `cmd` first (`cmd+shift+s`), as `pressKey` takes them.
+- JavaScript: `getAXState({refresh})`, `getScreenshot(windowId, {marks, region, ocr, maxEdge})`, `readText`, `waitFor`, `chooseMenu`, `verify`, and `pressKey(key, {via: 'menu'})`; `apps` accepts `:read` and `:click` entries. `ComputerError` moved to `src/errors.mjs` and is still exported from `src/computer.mjs`.
+- `npm run test:perception` exercises these on the fixture, which gains an optional menu bar. The helper now links the Vision framework.
+
+### Agents browse in their own Chrome
+
+Agents get a Chrome of their own, apart from the person's.
+
+- **`agent-browser`.** A second Google Chrome instance with its own profile folder (`~/Library/Application Support/OpenComputer/AgentBrowser`, or `OPENCOMPUTER_AGENT_PROFILE`). `open` with `app: "agent-browser"` starts it in the background, or opens the link as a new tab inside it, so agent pages never land in the person's windows and the person's tab switches never move an agent's target. It is launched so that it keeps painting, running timers, and exposing page content while covered, behind other windows, or behind a fullscreen app. New tabs are made through its own accessibility tree and keys posted to its process, so Chrome has no reason to come forward. Sign-ins are its own: sign in once in that window per site.
+- **`com.google.Chrome` means the person's Chrome.** Without an explicit `pid` it never resolves to the agent browser, which `apps` lists as `agent-browser`. Allowing `com.google.Chrome` does not allow the agent browser; `*` or `agent-browser` does.
+- **Fullscreen apps are left alone.** While the app in front is fullscreen or draws a display-sized window (games), `open` on the agent browser refuses with `USER_BUSY` (`reason: "fullscreen-app"`) instead of starting Chrome or opening a tab, because either can bring Chrome over it for a moment. Existing agent tabs still work: navigate one with `setValue` on its address bar and `pressKey` Return.
+- **Screenshots when ScreenCaptureKit stalls.** When ScreenCaptureKit does not answer within 6 s (seen for every window while a fullscreen game ran), the window is taken with the system `screencapture` tool instead for the next two minutes. Results carry `captureTool: "screencapture"`; `clickPoint` works the same on them. `marks`, `ocr`, and `maxEdge` work there too; `region` returns the whole window with `regionIgnored: true`. `OPENCOMPUTER_CAPTURE=screencapture` forces that path.
+
+Known limit: starting the agent browser, or making it a new window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Start it once and keep one agent tab open.
+
+### Demo and release
+
+- `npm run demo` is a narrated tour of these features on the fixture, including an unanswered approval question and the person pressing **Take over** and **Resume** (the demo moves the real pointer for that step; OpenComputer itself never does). `scripts/record-demo.sh` runs it in its own Terminal window and records the screen.
+- `status().activity.buttons` gives the open card's buttons with their screen positions.
+- New workflows: "Live tests and demo" runs the live fixture suites on a GitHub macOS runner and records the demo; "Release" builds the ZIPs, runs the unit and live tests, records the demo, and publishes the GitHub release with the video.
+
+Validation: on a GitHub macOS runner (macos-latest), `npm run test:perception` (25 assertions) and `npm run test:integration` (19) pass, the live overlay UI test passes, and the demo runs end to end; the release workflow repeats them before publishing. The helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side. The agent browser is not covered by the runner tests.
 
 ## 0.4.4 — 2026-11-12
 
