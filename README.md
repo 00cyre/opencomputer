@@ -29,7 +29,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 
 | For your agent | For your desktop |
 | :--- | :--- |
-| Fourteen MCP tools with explicit input schemas. | Exact app allowlists, or explicit all-app access on your own Mac. |
+| Eighteen MCP tools with explicit input schemas. | Exact app allowlists, read-only apps, or explicit all-app access on your own Mac. |
 | Compact outlines with element IDs that stay valid across actions. | Clicks are accessibility presses; keys go to the target process only. Your pointer never moves. |
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
 | Native actions with verification metadata. | An app that brings itself forward is sent back; your foreground app is restored. |
@@ -55,7 +55,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 }
 ```
 
-Ask your agent to inspect a disposable TextEdit document. Have it read the current state before each action and check the result afterward. **Empty allowlist means no app access.** Use `node bin/opencomputer.mjs apps` to find bundle IDs. Set `OPENCOMPUTER_APPS` to `*` for explicit access to all running apps and their existing sessions; no VM or browser-profile copying.
+Ask your agent to inspect a disposable TextEdit document. Have it read the current state before each action and check the result afterward. **Empty allowlist means no app access.** Use `node bin/opencomputer.mjs apps` to find bundle IDs. Set `OPENCOMPUTER_APPS` to `*` for explicit access to all running apps and their existing sessions; no VM or browser-profile copying. Add `:read` to an entry (`com.apple.Mail:read`, or `*:read`) to let the agent look but not act.
 
 > **Developer runtime:** the native helper is ad-hoc signed, not Apple-notarized. macOS may block downloaded binaries. Follow the normal macOS approval flow or [build from source](docs/DEVELOPMENT.md); OpenComputer never disables Gatekeeper. This release is a developer runtime, not a graphical installer.
 
@@ -101,6 +101,10 @@ Element IDs stay valid across actions until the next full observe of that app; o
 - **Text, keys, and scrolling:** insertion at the caret, typed text and shortcuts delivered to the target process only, and page scrolling.
 - **Fast reads:** batched attribute reads return a typical thousand-element window in well under a second, as a compact outline with `query` search.
 - **Activity and focus protection:** hover-to-expand dots, visible-target ghost cursor, window-aware interaction checks, and foreground restoration when an app activates itself.
+- **Act and verify in one call:** pass `changes: true` to any action to get back only what changed since the last read (`+` added, `-` removed, `~` changed), with the same element IDs. `waitFor` waits for an element to appear or go away instead of polling.
+- **See what the outline can't:** screenshots can label every control with its element ID (`marks`), zoom into a region at full display resolution (`region`), and read text from pixels with on-device Vision OCR (`ocr`), with or without the picture.
+- **Fewer round trips:** `menu` runs a command by path (`File > Export as PDF…`) and menu items show their shortcuts, `readText` returns a page or document as plain text, and `batch` runs a known sequence of steps in one call.
+- **Read-only apps:** `bundle:read` entries allow observing and screenshots but refuse every action, so an agent can read Mail while acting only in the app you chose.
 - **Any agent:** each MCP client runs its own server, so several agents can work at once.
 
 **Not implemented:** hover, drag, right-click, pixel-exact clicks on canvases, browser DOM automation, Windows/Linux, and locked-screen operation. Canvas-only controls, minimized windows, secure fields, and apps with incomplete accessibility support may not work. Keys reach the target app's own focused control, and some apps ignore keys while in the background. An app can still bring itself forward for a moment before the foreground is handed back; public macOS APIs cannot prevent that. Each agent host needs its own Accessibility and Screen Recording approval. [Compatibility and acceptance checks](docs/TESTING.md).

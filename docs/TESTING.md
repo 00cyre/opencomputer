@@ -40,6 +40,14 @@ Launches the fixture with two browser-like tabs whose window title follows the s
 
 A manual run against a throwaway Chrome for Testing window (separate app and profile) on 2026-11-11 passed 20 checks: page buttons, the address bar, and bare `Return` refused after a tab switch (`window-title`), the same between two tabs titled identically (`tab`), the old page refused after the agent's own tab switch (`detached`) and after the person navigated (`STALE_ELEMENT`), `clickPoint` refused after a tab switch, and closing the agent's own tab then reselecting the person's tab from one snapshot allowed.
 
+## Reading features
+
+```sh
+npm run test:perception
+```
+
+Launches the fixture with a menu bar and checks, through the production helper: read-only access observes but refuses `setValue` with nothing reaching the fixture; `refresh` keeps the snapshot and element IDs and reads the new value; a `marks` screenshot labels the fixture's controls; OCR finds the window's heading; a zoomed `region` around the submit button is captured at least at the original size and `clickPoint` in it submits exactly once; `waitFor` finds the status text the submit produced; `readText` returns the window's text and a field's value; the menu item reports `cmd+shift+k`; and `chooseMenu('Tools > Stamp Document')` runs the command once without taking the foreground. 20 assertions. Not yet run on a Mac at the time of writing: the code compiles in CI, and the JavaScript side is covered by `npm test`.
+
 ## Activity and focus tests
 
 Run these serially after building the fixture:

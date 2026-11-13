@@ -1,5 +1,21 @@
 # Changelog
 
+## Unreleased
+
+Ideas from other computer-use projects, rebuilt for background control on the Mac: verify an action in the same call, wait instead of polling, see what the outline cannot, and let agents look without acting.
+
+- **`changes` on observe and every action.** The server re-reads the app's last scope into the same snapshot and returns only what was added (`+`), removed (`-`), or reads differently (`~`, with what it was). IDs stay valid, so one call acts and verifies. Built on the helper's new `observe` `refresh` mode, which keeps element IDs across re-reads.
+- **`waitFor`.** Re-reads about three times a second until an element matches a query, or with `gone` until none does, then returns the matches with usable IDs, or `WAIT_TIMEOUT`.
+- **Screenshot `marks`, `region`, and `ocr`.** Marks draw the latest snapshot's element IDs on the picture. A region zooms into the previous screenshot at up to display density, and `clickPoint` follows the zoomed picture. OCR returns Vision text lines with pixel boxes; MCP `image: false` returns the text alone.
+- **`readText`.** An element's full value, or a container's text in reading order, in pages of up to 100,000 UTF-16 units.
+- **`menu`.** Runs a menu bar command by path, such as `File > Export as PDF…`, without opening the menu. Menu items now report their keyboard shortcut (`keys:cmd+shift+s`).
+- **`batch`.** Up to 20 tool calls in one request, all validated first, stopping at the first error.
+- **Read-only apps.** `OPENCOMPUTER_APPS` entries ending in `:read`, including `*:read`, allow observing, screenshots, and reading but refuse actions and URLs with `READ_ONLY_APP`. An explicit `bundle:read` entry overrides `*`.
+- JavaScript: `getAXState({refresh})`, `getScreenshot(windowId, {marks, region, ocr})`, `readText`, `waitFor`, and `chooseMenu`. `ComputerError` moved to `src/errors.mjs` and is still exported from `src/computer.mjs`.
+- `npm run test:perception` exercises these on the fixture, which gains an optional menu bar. The helper now links the Vision framework.
+
+Validation: the helper and fixture compile for arm64 and x86_64 in CI and `npm test` covers the server side; the live fixture test has not yet been run on a Mac.
+
 ## 0.4.4 — 2026-11-12
 
 Open and save panels on big folders, and steadier window choice.

@@ -4,6 +4,10 @@ import {fileURLToPath} from 'node:url';
 import {copyFileSync, chmodSync, existsSync, mkdirSync, readdirSync, renameSync, rmSync, statSync} from 'node:fs';
 import {homedir} from 'node:os';
 import {join, sep} from 'node:path';
+import {ComputerError} from './errors.mjs';
+import {chooseMenu, viewsOf, waitFor} from './flows.mjs';
+
+export {ComputerError};
 
 // macOS ScreenCaptureKit hangs for a helper binary inside a TCC-protected folder
 // (~/Documents, ~/Desktop, ~/Downloads, iCloud Drive). Run a copy from Application Support.
@@ -28,15 +32,12 @@ export function stageExecutable(path, home = homedir()) {
   } catch { return path; }
 }
 
-export class ComputerError extends Error {
-  constructor(code, message, details) { super(message); this.name = 'ComputerError'; this.code = code; if (details !== undefined) this.details = details; }
-}
-
 /** One connection owns one native process, which keeps one accessibility snapshot per app. */
 export class Computer {
   #child; #queue = Promise.resolve(); #pending; #closed = false; #explicitAgent; #clientName;
   constructor({apps = [], agent, overlay = true, executable = process.env.OPENCOMPUTER_NATIVE || fileURLToPath(new URL('../build/opencomputer-native', import.meta.url)), timeoutMs = 20000} = {}) {
-    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || (x !== '*' && !/^[a-zA-Z0-9._-]+$/.test(x)))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps');
+    // bundle:read (or *:read) allows observing and screenshots of that app, but no actions.
+    if (!Array.isArray(apps) || apps.some(x => typeof x !== 'string' || !/^(\*|[a-zA-Z0-9._-]+)(:read)?$/.test(x))) throw new TypeError('apps must be exact bundle IDs or an explicit * for all apps, each optionally ending in :read for read-only access');
     if (agent !== undefined && (typeof agent !== "string" || agent.length > 100)) throw new TypeError("agent must be a string of at most 100 characters");
     this.#explicitAgent = agent;
     this.timeoutMs = timeoutMs;
@@ -110,13 +111,47 @@ class App {
   #scope() { return this.#pid === undefined ? {app:this.#bundle} : {app:this.#bundle, pid:this.#pid}; }
   /** Launch the app, or open a URL in it, without bringing it forward. */
   open(url) { return this.#computer.request('open', {app:this.#bundle, ...(url === undefined ? {} : {url})}); }
-  async getAXState({window, root, menu, limit} = {}) {
+  /**
+   * Read the app. `refresh: true` re-reads into the current snapshot so earlier element ids
+   * keep working (a fresh observe when there is none).
+   */
+  async getAXState({window, windowTitle, root, menu, limit, budgetMs, refresh} = {}) {
     if (root !== undefined && !this.#snapshot) throw new ComputerError('OBSERVE_REQUIRED', 'Observe before expanding a subtree');
-    const result = await this.#computer.request('observe', {...this.#scope(), window, root, menu, limit, ...(root === undefined ? {} : {snapshot:this.#snapshot})});
+    const args = {...this.#scope(), window, windowTitle, root, menu, limit, budgetMs};
+    if (refresh && this.#snapshot && root === undefined && !menu) {
+      try {
+        const result = await this.#computer.request('observe', {...args, refresh:true, snapshot:this.#snapshot});
+        this.#snapshot = result.snapshot;
+        return result;
+      } catch (error) { if (error.code !== 'STALE_SNAPSHOT') throw error; }
+    }
+    const result = await this.#computer.request('observe', {...args, ...(root === undefined ? {} : {snapshot:this.#snapshot})});
     this.#snapshot = result.snapshot;
     return result;
   }
-  getScreenshot(windowId) { return this.#computer.request('screenshot', {...this.#scope(), windowId}); }
+  /** Capture a window. `marks` labels element ids, `region` zooms into the last screenshot, `ocr` adds recognized text lines. */
+  getScreenshot(windowId, {marks, region, ocr} = {}) { return this.#computer.request('screenshot', {...this.#scope(), windowId, marks, region, ocr}); }
+  /** Full text of an element, or of everything inside a container, from `offset` (UTF-16 units). */
+  readText(element, {offset, length} = {}) {
+    if (!this.#snapshot) return Promise.reject(new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before reading an element'));
+    return this.#computer.request('readText', {...this.#scope(), snapshot:this.#snapshot, element, offset, length});
+  }
+  /** Re-read until an element matches `query` (or, with `gone`, none does); resolves with the read and its matches. */
+  async waitFor(query, {gone, timeoutMs, window, windowTitle} = {}) {
+    const request = (method, args) => this.#computer.request(method, args);
+    const views = viewsOf(this.#computer);
+    // Start from this handle's snapshot so the ids it already holds stay valid.
+    if (this.#snapshot && views.get(this.#bundle)?.snapshot !== this.#snapshot) views.remember(this.#bundle, {snapshot:this.#snapshot, nodes:[]}, {});
+    const outcome = await waitFor(request, views, {...this.#scope(), query, gone, timeoutMs, window, windowTitle});
+    this.#snapshot = outcome.result.snapshot;
+    return outcome;
+  }
+  /** Press a menu bar command by path, such as 'File > Export as PDF…' or ['File', 'Export as PDF…']. */
+  async chooseMenu(path, options = {}) {
+    const result = await chooseMenu((method, args) => this.#computer.request(method, args), {...this.#scope(), path, ...options});
+    this.#snapshot = result.snapshot;
+    return result;
+  }
   checkInteraction(element, {intrusive} = {}) {
     if (element !== undefined && !this.#snapshot) return Promise.reject(new ComputerError('OBSERVE_REQUIRED', 'Call getAXState before checking an element'));
     return this.#computer.request('checkInteraction', {...this.#scope(), ...(element === undefined ? {} : {snapshot:this.#snapshot, element}), intrusive});

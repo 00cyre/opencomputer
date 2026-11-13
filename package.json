@@ -29,7 +29,8 @@
     "test:ui": "bash scripts/test-ui.sh",
     "test:motion": "bash scripts/test-motion.sh",
     "test:interaction": "bash scripts/test-interaction.sh",
-    "test:guard": "node tests/target-guard.mjs"
+    "test:guard": "node tests/target-guard.mjs",
+    "test:perception": "node tests/perception.mjs"
   },
   "engines": {
     "node": ">=22"

@@ -10,8 +10,11 @@ A `Computer` instance owns a serial native helper connection. `getApp(bundleId)`
 | `computer.getState()` | Running regular apps: name, bundle ID, PID, frontmost, hidden, allowlist status. |
 | `computer.getApp(bundleId, {pid}?)` | App handle. Pass `pid` when several instances of one bundle run. |
 | `app.open(url?)` | Launch the app, or open an `http`, `https`, or `file` URL in it, without activating it. |
-| `app.getAXState({window?, root?, menu?, limit?}?)` | Snapshot, node array, and window list. Select a window, expand a subtree, or read the menu bar. |
-| `app.getScreenshot(windowId?)` | PNG data/metadata, or `selectionRequired` with candidate windows. |
+| `app.getAXState({window?, windowTitle?, root?, menu?, limit?, budgetMs?, refresh?}?)` | Snapshot, node array, and window list. Select a window, expand a subtree, or read the menu bar. `refresh: true` re-reads into the current snapshot so element IDs keep working. |
+| `app.getScreenshot(windowId?, {marks?, region?, ocr?}?)` | PNG data/metadata, or `selectionRequired` with candidate windows. See [screenshots](#screenshots-marks-zoom-and-text). |
+| `app.readText(element, {offset?, length?}?)` | The element's full value, or the text inside a container, in pages. |
+| `app.waitFor(query, {gone?, timeoutMs?, window?, windowTitle?}?)` | Re-reads until an element matches (or none does); resolves with the read and its `matches`. |
+| `app.chooseMenu(path, {waitMs?}?)` | Presses a menu bar command by path, such as `'File > Export as PDF…'`. |
 | `app.click(element)` | Press, select, or focus the element, or the control containing it. No pointer. |
 | `app.clickPoint(x, y)` | The same press on the element under a pixel of the last screenshot of this app. |
 | `app.setValue(element, value)` | Replace a writable accessibility value (text or number). |
@@ -36,6 +39,8 @@ const computer = createComputer({
 
 An explicit `agent` takes priority over MCP `initialize.clientInfo.name`. Identity is presentation metadata, not authentication. `executable`, or the `OPENCOMPUTER_NATIVE` environment variable, overrides the helper path. A timeout terminates the connection, preventing a late reply from being applied to a later request. **Do not blindly retry a timed-out action: inspect its outcome first.**
 
+Append `:read` to an entry for read-only access: `apps: ['com.apple.Mail:read']`, or `'*:read'` for every app. Read-only apps can be observed, captured, read with `readText`, waited on, and launched, but every action and `open` with a URL refuses with `READ_ONLY_APP` (`details.dispatched: false`) before anything is resolved. An explicit `bundle:read` entry wins over `*`, so `['*', 'com.apple.Mail:read']` opens everything except Mail, and `['*:read', 'com.apple.TextEdit']` lets the agent read everything and act only in TextEdit. `apps` reports each app's `access` (`full`, `read`, or `none`).
+
 `apps: ['*']` explicitly enables all running apps. Each request still names one bundle ID, and snapshots, captures, and actions remain scoped to its process. The default is no app access. This uses the apps and logged-in sessions on the current Mac; it creates no VM and copies no credentials.
 
 ## Observing
@@ -49,6 +54,36 @@ Some apps report rows on a list but expose none as children. Observe then hit-te
 Lists with more than 60 children are read after the rest of the window, so controls beside a long list are never lost to the time budget (`budgetMs`, 1000–15000, default 4000). `windowTitle` selects a window by title instead of index.
 
 Element IDs stay valid across actions. A full or window observe of an app replaces that app's snapshot; `root` and `menu` observations extend the current one and keep existing IDs. Snapshots expire 5 minutes after their last use and are scoped to one process. A stale or foreign ID fails with `STALE_SNAPSHOT`.
+
+### Re-reading and changes
+
+`observe` with `refresh: true` and the current `snapshot` re-reads the same scope into that snapshot instead of starting a new one: elements seen before keep their IDs, new ones get new IDs, and the result carries `refreshed: true`. Without a current snapshot it fails with `STALE_SNAPSHOT`.
+
+The MCP server builds on it. `observe` with `changes: true`, and any action with `changes: true` (after a 300 ms settle), re-reads the scope of that app's last full or window observe and lists only what differs:
+
+```
+app com.apple.TextEdit pid 412 snapshot 9F2C… (re-read; earlier ids still apply)
+41 elements in 18 ms; frontmost app: com.apple.Terminal
+changes since the last read: 1 added, 1 changed, 0 removed
+
++ [57] Sheet "Save"
+~ [4] TextArea ="Hello world" editable focused
+    was: TextArea ="Hello" editable
+```
+
+`+` is new, `-` went away, `~` reads differently, with what it was. A truncated read never reports removals. With nothing to compare (no earlier read, or the helper restarted) the full outline comes back instead. One call then both acts and verifies, and the IDs in the diff work with the next action.
+
+### Waiting
+
+`waitFor` re-reads the app about three times a second, keeping IDs, until an element matches `query` (the same word matching as observe), or with `gone: true` until none matches. It returns the matching lines and how long it waited, or `WAIT_TIMEOUT` with `details.reads` and `details.matches` after `timeoutMs` (default 10000, at most 60000). Use it after an action that opens a sheet, loads a page, or finishes a download, instead of observing in a loop. A truncated read never counts as gone.
+
+### Reading text
+
+`readText` returns the full `AXValue` of an element (`source: "value"`), or for a container with no text value, such as a web area, message, or table, the text inside it in reading order (`source: "contents"`): static text, field values, and the labels of leaf buttons and links, with pieces on one visual line joined by spaces. Secure fields are skipped and refused. Pages are given in UTF-16 units: `offset` (default 0) and `length` (default 20000, at most 100000); `more: true` means there is text after this page. It is cheaper than an outline for reading an article or a long document. The action log records only the length.
+
+### Menus
+
+Menu items read with `menu: true` carry their keyboard shortcut as `shortcut` in `pressKey` syntax (`cmd+shift+s`), shown in the outline as `keys:cmd+shift+s`. The MCP `menu` tool, and `app.chooseMenu`, take a path such as `"File > Export as PDF…"` or `"Format > Font > Bold"`: they read the menu bar and press that item with `AXPress`, without opening the menu or bringing the app forward. Matching ignores case and a trailing ellipsis, and falls back to the first title that starts with the step. `MENU_ITEM_NOT_FOUND` lists the titles available at the step that failed (`details.available`); `MENU_ITEM_DISABLED` means the item is greyed out; a path ending on a submenu is refused with its items. Some apps only update a menu's items when it is opened by hand, and some ignore presses while in the background: verify the effect.
 
 ### Changed targets
 
@@ -82,6 +117,16 @@ Typed text and set values are never written, only `textLength` or `valueLength`;
 
 
 Chromium and Electron apps build their accessibility tree on demand. The first observe switches it on (`webAccessibilityEnabled: true`); observe again if page content is missing.
+
+## Screenshots: marks, zoom, and text
+
+`screenshot` takes three options, together or apart:
+
+- **`marks: true`** draws each pressable, pickable, or editable element of the app's latest snapshot that lies in the captured window as a coloured box with its element ID. A model that reads the picture can name the control it means and act with `click`, without guessing coordinates. Window-sized containers are left out; at most 300 marks. The result carries `marked`; without a current snapshot it carries `marked: 0` and `marksNote`.
+- **`region: {x, y, width, height}`** zooms in: it captures only that rectangle, given in pixels of the most recent screenshot of the app, of the same window, at up to the display's pixel density (at most 1600 px on the long side), so small text becomes legible. The result carries `zoomed: true`. `clickPoint`, and the next `region`, then use the zoomed picture's pixels, so zooming twice narrows further. The window must have kept its title and size since that screenshot.
+- **`ocr: true`** runs Vision text recognition on the picture and adds `lines`: `{text, x, y, width, height, confidence}` in its pixels, in reading order. The MCP server returns them as a separate text block (`[x,y,width,height] text`). It reads canvases, images, and custom-drawn controls the outline cannot see. MCP `image: false` leaves the picture out and returns only metadata and text, which costs far fewer tokens.
+
+Recognition runs on the Mac; neither recognized text nor pixels are logged or stored.
 
 ## Acting without the pointer or the foreground
 
@@ -133,7 +178,7 @@ Observation, capture, and actions update the indicators. `status().activity` con
 
 ## MCP
 
-Tools: `status`, `apps`, `open`, `observe`, `screenshot`, `checkInteraction`, `click`, `clickPoint`, `setValue`, `performAction`, `typeText`, `pressKey`, `scroll`, and `release`. Clients add their own server-name prefix. Use `tools/list` for the canonical schemas.
+Tools: `status`, `apps`, `open`, `observe`, `screenshot`, `readText`, `waitFor`, `checkInteraction`, `click`, `clickPoint`, `setValue`, `performAction`, `typeText`, `pressKey`, `scroll`, `menu`, `batch`, and `release`. Clients add their own server-name prefix. Use `tools/list` for the canonical schemas. Every action tool also takes `changes` (see [re-reading and changes](#re-reading-and-changes)).
 
 `observe` returns a compact text outline by default, one line per useful element:
 
@@ -148,6 +193,8 @@ windows: [0] "Untitled" main
 ```
 
 Unlabelled containers are dropped and their children move up a level. `query` lists only elements whose role, label, identifier, or value contain every word, which is the fastest way to find a control in a large app. `format: "json"` returns every node with its frame.
+
+`batch` runs up to 20 tool calls in order, each `{tool, arguments}` with the same names and arguments as a single call, and stops at the first error. Every step is validated before the first runs, so a typo in a late step sends nothing; each step still waits for the person and checks its target as usual. On failure the content holds the finished steps' results followed by the error, whose `details` name the failing `step`, its `tool`, and how many steps `completed`. A batch is one tool call to your client, so a client that approves tool calls one at a time approves the whole sequence at once.
 
 Screenshots use image blocks plus text metadata. Native errors are `isError: true` tool results with `code`, `message`, and optional `details`. Invalid JSON-RPC or schema arguments return protocol errors.
 

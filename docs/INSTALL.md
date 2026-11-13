@@ -58,7 +58,7 @@ The three-dot animation and ghost cursor are enabled by default. Hover the dots 
 
 ## Direct access to your Mac
 
-Set `OPENCOMPUTER_APPS` to `*` to explicitly allow all running apps, or keep a comma-separated list of exact bundle IDs. In the JavaScript client, use `apps: ['*']`. Each operation still targets a specific app and its own windows. Existing app/browser logins remain in place; there is no separate desktop, VM, profile copy, or new login flow.
+Set `OPENCOMPUTER_APPS` to `*` to explicitly allow all running apps, or keep a comma-separated list of exact bundle IDs. Add `:read` to any entry for read-only access, for example `*:read,com.apple.TextEdit` to let the agent read every app but act only in TextEdit. In the JavaScript client, use `apps: ['*']`. Each operation still targets a specific app and its own windows. Existing app/browser logins remain in place; there is no separate desktop, VM, profile copy, or new login flow.
 
 For Codex, register the local stdio server with its installed CLI:
 
