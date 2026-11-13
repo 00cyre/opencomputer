@@ -52,68 +52,11 @@ struct AgentIdentity {
     }
 }
 
-final class ActivityView: NSView {
-    var expanded = false
-    var agent = AgentIdentity("Agent")
-    var agentIcon: NSImage?
-    var appIcon: NSImage?
-    var appName = ""
-    var windowTitle = ""
-    var action = "Working"
-    var blocked = false
-    override var isFlipped: Bool { true }
-    override func acceptsFirstMouse(for event: NSEvent?) -> Bool { false }
-    func text(_ value: String, rect: NSRect, size: CGFloat, color: NSColor, weight: NSFont.Weight = .regular) {
-        let paragraph = NSMutableParagraphStyle(); paragraph.lineBreakMode = .byTruncatingTail
-        (value as NSString).draw(in: rect, withAttributes: [.font:NSFont.systemFont(ofSize:size,weight:weight),.foregroundColor:color,.paragraphStyle:paragraph])
-    }
-    override func draw(_ dirtyRect: NSRect) {
-        NSColor(srgbRed:0.10,green:0.11,blue:0.13,alpha:0.96).setFill()
-        let path = NSBezierPath(roundedRect: bounds.insetBy(dx:0.5,dy:0.5), xRadius: expanded ? 18 : 15, yRadius: expanded ? 18 : 15)
-        path.fill(); NSColor.white.withAlphaComponent(0.13).setStroke(); path.lineWidth = 1; path.stroke()
-        let color: NSColor = blocked ? .systemOrange : agent.color
-        if !expanded {
-            for i in 0..<3 {
-                let phase = Date.timeIntervalSinceReferenceDate * 4.5 - Double(i) * 0.7
-                color.withAlphaComponent(0.3 + 0.7 * (sin(phase) + 1) / 2).setFill()
-                NSBezierPath(ovalIn:NSRect(x:13 + CGFloat(i)*11,y:12,width:5,height:5)).fill()
-            }
-            return
-        }
-        let iconRect = NSRect(x:14,y:14,width:30,height:30)
-        if let icon = agentIcon { icon.draw(in:iconRect,from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil) }
-        else { color.setFill(); NSBezierPath(ovalIn:iconRect).fill(); text(String(agent.name.prefix(1)),rect:NSRect(x:24,y:20,width:16,height:22),size:14,color:.white,weight:.semibold) }
-        text("→",rect:NSRect(x:51,y:20,width:20,height:24),size:16,color:NSColor.white.withAlphaComponent(0.6))
-        appIcon?.draw(in:NSRect(x:77,y:16,width:27,height:27),from:.zero,operation:.sourceOver,fraction:1,respectFlipped:true,hints:nil)
-        text("\(agent.name) → \(appName)",rect:NSRect(x:114,y:13,width:248,height:20),size:12,color:.white,weight:.semibold)
-        text(windowTitle.isEmpty ? appName : windowTitle,rect:NSRect(x:114,y:34,width:248,height:18),size:11,color:NSColor.white.withAlphaComponent(0.64))
-        color.setFill(); NSBezierPath(ovalIn:NSRect(x:17,y:64,width:5,height:5)).fill()
-        text(action,rect:NSRect(x:31,y:58,width:331,height:20),size:11,color:NSColor.white.withAlphaComponent(0.82))
-    }
-}
-
-final class GhostView: NSView {
-    var tint = NSColor.systemTeal
-    var pulseUntil = Date.distantPast
-    override var isFlipped: Bool { true }
-    override func draw(_ dirtyRect: NSRect) {
-        if pulseUntil > Date() {
-            tint.withAlphaComponent(0.16).setFill()
-            NSBezierPath(ovalIn:NSRect(x:1,y:1,width:38,height:38)).fill()
-        }
-        let path = NSBezierPath()
-        path.move(to:NSPoint(x:9,y:5)); path.line(to:NSPoint(x:10,y:32)); path.line(to:NSPoint(x:17,y:26))
-        path.line(to:NSPoint(x:23,y:39)); path.line(to:NSPoint(x:29,y:36)); path.line(to:NSPoint(x:23,y:24))
-        path.line(to:NSPoint(x:33,y:24)); path.close()
-        NSColor.white.withAlphaComponent(0.94).setStroke(); path.lineWidth = 2.3; path.stroke()
-        tint.setFill(); path.fill()
-    }
-}
-
 @MainActor
 final class ActivityOverlay {
-    let panel = AnnotationPanel(size:NSSize(width:54,height:30))
-    let ghost = AnnotationPanel(size:NSSize(width:44,height:46))
+    let panel = AnnotationPanel(size:NSSize(width:ActivityView.pillWidth,height:ActivityView.pillHeight))
+    let ghost = AnnotationPanel(size:GhostView.size)
+    let glass = NSVisualEffectView()
     let view = ActivityView()
     let ghostView = GhostView()
     let sessionID = "\(getpid())-\(UUID().uuidString)"
@@ -131,19 +74,44 @@ final class ActivityOverlay {
     var offset: CGFloat = 0
     var timer: Timer?
     var ghostMotion = GhostMotion()
+    var lastGhostX: CGFloat?
     var enabled = ProcessInfo.processInfo.environment["OPENCOMPUTER_OVERLAY"] != "0"
     var registryReady = false
+    /// The person pressed Take over: mutations are refused until they press Resume.
+    /// Survives release, so an agent cannot end the pause by finishing its session.
+    var paused = false
+    var approvals = ApprovalDesk()
+    /// Serial of the newest step, so a failed request can mark only the steps it started.
+    var stepSerial = 0
+    var revealFrom: CGFloat = 0
+    var revealTo: CGFloat = 0
+    var revealStart: TimeInterval = 0
+    var cardHeight: CGFloat = 0
+    var masks: [Int:NSImage] = [:]
+    var actionTitles: [String] = []
+    /// Called when the person hands control back, so the helper drops snapshots taken before.
+    var onResume: (() -> Void)?
     let pointerLocation: () -> NSPoint
     var sessionURL: URL { registry.appendingPathComponent(sessionID + ".json") }
     init(pointer: @escaping () -> NSPoint = { NSEvent.mouseLocation }) {
         pointerLocation = pointer
-        view.frame = NSRect(origin:.zero,size:panel.frame.size); panel.contentView = view
+        glass.material = .popover
+        glass.blendingMode = .behindWindow
+        glass.state = .active
+        glass.frame = NSRect(origin:.zero,size:panel.frame.size)
+        glass.autoresizingMask = [.width,.height]
+        view.frame = glass.bounds
+        view.autoresizingMask = [.width,.height]
+        glass.addSubview(view)
+        panel.contentView = glass
         ghostView.frame = NSRect(origin:.zero,size:ghost.frame.size); ghost.contentView = ghostView
         panel.title = "OpenComputer activity"; ghost.title = "OpenComputer ghost cursor"
         ghost.hasShadow = false
         ghost.setAccessibilityHidden(true)
         ghostView.setAccessibilityHidden(true)
         panel.setAccessibilityLabel("OpenComputer activity. Hover to expand.")
+        view.onButton = { [weak self] button in MainActor.assumeIsolated { self?.press(button) } }
+        applyMask()
         do {
             try FileManager.default.createDirectory(at:registry,withIntermediateDirectories:true,attributes:[.posixPermissions:0o700])
             let attrs = try FileManager.default.attributesOfItem(atPath:registry.path)
@@ -153,11 +121,13 @@ final class ActivityOverlay {
         timer = Timer.scheduledTimer(withTimeInterval:1.0/60.0,repeats:true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
     }
     func configure(_ label: String) {
-        view.agent = AgentIdentity(label); view.agentIcon = view.agent.icon; ghostView.tint = view.agent.color
-        view.needsDisplay = true
+        view.agent = AgentIdentity(label); view.agentIcon = view.agent.icon
+        ghostView.tint = view.agent.color; ghostView.name = view.agent.name
+        view.needsDisplay = true; ghostView.needsDisplay = true
     }
     func track(_ target: NSRunningApplication, element: AXUIElement? = nil, title: String? = nil, captureWindowID: CGWindowID? = nil, captureFrame: CGRect? = nil, action: String) {
         let changed = app?.processIdentifier != target.processIdentifier
+        if !active { view.startedAt = Date(); view.steps = [] }
         app = target; active = true
         view.appName = cleanLabel(target.localizedName ?? target.bundleIdentifier ?? "App",limit:50)
         if changed { view.appIcon = target.bundleURL.map { NSWorkspace.shared.icon(forFile:$0.path) }; pointOffset = nil; window = nil; windowID = nil }
@@ -185,59 +155,187 @@ final class ActivityOverlay {
             ghostView.pulseUntil = Date().addingTimeInterval(0.6)
         }
         view.action = cleanLabel(action); view.blocked = false
+        record(view.action)
         lastWindowRefresh = .distantPast
         tick()
     }
-    func markWaiting(_ reason: String) { view.blocked = true; view.action = cleanLabel(reason); view.needsDisplay = true }
+    /// Adds a step to the card's timeline; repeating the current step only clears its wait.
+    func record(_ text: String) {
+        if let last = view.steps.indices.last, view.steps[last].open {
+            if view.steps[last].text == text { view.steps[last].state = .running; view.steps[last].detail = nil; return }
+            view.steps[last].state = .done
+        }
+        stepSerial += 1
+        view.steps.append(ActivityStep(text:text,detail:nil,state:.running,started:Date(),serial:stepSerial))
+        if view.steps.count > 8 { view.steps.removeFirst(view.steps.count - 8) }
+    }
+    func markWaiting(_ reason: String) {
+        view.blocked = true; view.action = cleanLabel(reason)
+        if let last = view.steps.indices.last, view.steps[last].open { view.steps[last].state = .waiting; view.steps[last].detail = cleanLabel(reason) }
+        view.needsDisplay = true
+    }
+    /// Shows why a request that started steps did not finish them.
+    func settle(since serial: Int, code: String) {
+        guard let last = view.steps.indices.last, view.steps[last].serial > serial, view.steps[last].open else { return }
+        let reasons = ["PAUSED_BY_USER":"stopped, you took over","APPROVAL_DENIED":"you declined","TARGET_CHANGED":"the page changed",
+                       "STALE_ELEMENT":"the control is gone","STALE_SNAPSHOT":"needs a fresh look","UNSUPPORTED_ACTION":"not supported here",
+                       "SECURE_FIELD":"secure field","FOCUS_UNSAFE":"would steal focus"]
+        switch code {
+        case "USER_BUSY", "APPROVAL_PENDING": return
+        default:
+            view.steps[last].state = .failed
+            view.steps[last].detail = reasons[code] ?? code.lowercased().replacingOccurrences(of:"_",with:" ")
+        }
+        view.needsDisplay = true
+    }
+    func press(_ button: CardButton) {
+        switch button {
+        case .takeOver: takeOver()
+        case .resume: resume()
+        case .allow: approvals.answer(true,now:Date())
+        case .deny: approvals.answer(false,now:Date())
+        }
+        tick()
+    }
+    func takeOver() {
+        paused = true; approvals.cancel()
+        if let last = view.steps.indices.last, view.steps[last].open { view.steps[last].state = .done }
+        view.needsDisplay = true
+    }
+    func resume() {
+        paused = false; view.blocked = false; view.needsDisplay = true
+        // The person may have changed anything while they had control.
+        onResume?()
+    }
+    /// Refuses a mutation while the person has taken over, and shows them how to resume.
+    func ensureNotPaused(_ target: NSRunningApplication?) throws {
+        guard paused else { return }
+        if !active, let target { track(target,action:"Waiting for you to resume") }
+        throw Failure(code:"PAUSED_BY_USER",message:"The person pressed Take over on the activity indicator, so nothing was dispatched. Actions stay refused until they press Resume there. Ask them in chat if you need to continue, then observe again before acting.",details:["dispatched":false])
+    }
+    /// Shows an approval question on the card and waits up to `wait` seconds for an answer.
+    /// `.waiting` means no answer yet (or the person took over); the question stays up and a
+    /// retry of the same action picks up the answer.
+    func requestApproval(key: String, title: String, detail: String, wait: TimeInterval) async -> ApprovalDesk.Outcome {
+        let deadline = Date().addingTimeInterval(wait)
+        while true {
+            if paused { return .waiting }
+            let outcome = approvals.ask(key:key,title:cleanLabel(title,limit:120),detail:cleanLabel(detail,limit:160),now:Date())
+            tick()
+            if outcome != .waiting || Date() >= deadline { return outcome }
+            try? await Task.sleep(nanoseconds:100_000_000)
+        }
+    }
     func release() {
         active = false; app = nil; window = nil; pointOffset = nil; windowID = nil
         panel.orderOut(nil); ghost.orderOut(nil); view.expanded = false
-        ghostMotion = GhostMotion()
+        revealFrom = 0; revealTo = 0; view.reveal = 0; cardHeight = 0
+        approvals.cancel(); view.approval = nil; view.steps = []; view.blocked = false
+        ghostMotion = GhostMotion(); lastGhostX = nil
         if registryReady { try? FileManager.default.removeItem(at:sessionURL) }
     }
     func shutdown() { timer?.invalidate(); timer = nil; release() }
     func updateRegistry(force: Bool = false) {
         guard registryReady, force || Date().timeIntervalSince(lastRegistryWrite) > 0.5 else { return }
         lastRegistryWrite = Date()
-        let record: [String:Any] = ["pid":getpid(),"updated":Date().timeIntervalSince1970,"expanded":view.expanded]
+        let height = view.expanded ? Double(view.expandedHeight) : Double(ActivityView.pillHeight)
+        let record: [String:Any] = ["pid":getpid(),"updated":Date().timeIntervalSince1970,"expanded":view.expanded,"height":height]
         if let data = try? JSONSerialization.data(withJSONObject:record) {
             try? data.write(to:sessionURL,options:.atomic)
             try? FileManager.default.setAttributes([.posixPermissions:0o600],ofItemAtPath:sessionURL.path)
         }
         let files = (try? FileManager.default.contentsOfDirectory(at:registry,includingPropertiesForKeys:nil)) ?? []
-        var peers: [(String,Bool)] = []
+        var peers: [(String,CGFloat)] = []
         for file in files where file.pathExtension == "json" {
             guard let data = try? Data(contentsOf:file), let record = try? JSONSerialization.jsonObject(with:data) as? [String:Any],
                   let pid = record["pid"] as? Int32, let updated = record["updated"] as? Double,
                   Date().timeIntervalSince1970-updated < 3, kill(pid,0) == 0 else { continue }
-            peers.append((file.deletingPathExtension().lastPathComponent,record["expanded"] as? Bool ?? false))
+            // Older helpers report only expanded/collapsed.
+            let fallback: CGFloat = (record["expanded"] as? Bool ?? false) ? 84 : 30
+            peers.append((file.deletingPathExtension().lastPathComponent,(record["height"] as? Double).map { CGFloat($0) } ?? fallback))
         }
         peers.sort { $0.0 < $1.0 }
         row = peers.firstIndex(where:{$0.0 == sessionID}) ?? 0
-        offset = peers.prefix(row).reduce(0) { $0 + ($1.1 ? 84 : 30) + 8 }
+        offset = peers.prefix(row).reduce(0) { $0 + $1.1 + 8 }
+    }
+    func animateReveal(to target: CGFloat) {
+        revealFrom = currentReveal(); revealTo = target; revealStart = Date.timeIntervalSinceReferenceDate
+    }
+    func currentReveal() -> CGFloat {
+        let duration = revealTo > revealFrom ? 0.28 : 0.18
+        return revealFrom + (revealTo - revealFrom) * easeOut(CGFloat((Date.timeIntervalSinceReferenceDate - revealStart) / duration))
+    }
+    func applyMask() {
+        let radius = Int(ActivityView.radius(view.reveal).rounded())
+        if masks[radius] == nil { masks[radius] = ActivityOverlay.mask(radius:CGFloat(radius)) }
+        glass.maskImage = masks[radius]
+    }
+    /// A stretchable rounded rectangle, so the glass keeps its corners at any size.
+    static func mask(radius: CGFloat) -> NSImage {
+        let edge = radius * 2 + 1
+        let image = NSImage(size:NSSize(width:edge,height:edge),flipped:false) { rect in
+            NSColor.black.setFill(); NSBezierPath(roundedRect:rect,xRadius:radius,yRadius:radius).fill(); return true
+        }
+        image.capInsets = NSEdgeInsets(top:radius,left:radius,bottom:radius,right:radius)
+        image.resizingMode = .stretch
+        return image
     }
     func tick() {
         guard enabled, active, let app = app, !app.isTerminated else {
             if active && app?.isTerminated == true { release() }
             return
         }
-        // Polling the pointer gives hover behavior while the panel remains entirely click-through.
+        let now = Date()
+        approvals.expire(now)
+        view.approval = approvals.pending
+        view.paused = paused
+        // Polling the pointer gives hover behavior without the dots ever taking a click.
         let pointer = pointerLocation()
-        if panel.isVisible && panel.frame.insetBy(dx:-5,dy:-5).contains(pointer) { lastHover = Date() }
-        let expanded = Date().timeIntervalSince(lastHover) < 0.25
-        if view.expanded != expanded { view.expanded = expanded; updateRegistry(force:true) }
+        if panel.isVisible && panel.frame.insetBy(dx:-5,dy:-5).contains(pointer) { lastHover = now }
+        // An approval question opens the card by itself; otherwise hover opens it.
+        let expanded = now.timeIntervalSince(lastHover) < 0.25 || view.approval != nil
+        if view.expanded != expanded { view.expanded = expanded; animateReveal(to:expanded ? 1 : 0); updateRegistry(force:true) }
         updateRegistry()
+        view.advanceHold(now:now)
+        // Assistive apps can stop or decline, never grant: Allow needs a person's held click.
+        let offered = view.buttons.filter { !$0.needsHold }
+        let titles = offered.map { $0.title }
+        if titles != actionTitles {
+            actionTitles = titles
+            view.setAccessibilityCustomActions(offered.map { button in
+                NSAccessibilityCustomAction(name:button.title) { [weak self] in _ = MainActor.assumeIsolated { self?.press(button) }; return true }
+            })
+        }
+        let reveal = currentReveal()
+        view.reveal = reveal
         guard let screen = NSScreen.screens.first else { return }
         let frame = screen.visibleFrame
-        let size = NSSize(width:expanded ? 380 : 54,height:expanded ? 84 : 30)
-        panel.setFrame(NSRect(x:frame.maxX-size.width-16,y:frame.maxY-size.height-12-offset,width:size.width,height:size.height),display:true)
-        view.frame = NSRect(origin:.zero,size:size)
+        // Height changes (a new step, an approval) glide instead of jumping.
+        cardHeight = cardHeight == 0 || reveal < 0.05 ? view.expandedHeight : cardHeight + (view.expandedHeight - cardHeight) * 0.3
+        if abs(cardHeight - view.expandedHeight) < 0.5 { cardHeight = view.expandedHeight }
+        let size = NSSize(width:round(ActivityView.pillWidth + (ActivityView.cardWidth - ActivityView.pillWidth) * reveal),
+                          height:round(ActivityView.pillHeight + (cardHeight - ActivityView.pillHeight) * reveal))
+        let target = NSRect(x:frame.maxX-size.width-16,y:frame.maxY-size.height-12-offset,width:size.width,height:size.height)
+        if panel.frame != target {
+            panel.setFrame(target,display:true)
+            applyMask()
+            panel.invalidateShadow()
+        }
+        // Only the fully open card takes clicks, for its buttons. The dots and the ghost never do.
+        panel.ignoresMouseEvents = !(view.expanded && reveal > 0.95)
+        view.hovered = view.button(at:NSPoint(x:pointer.x - panel.frame.minX,y:panel.frame.maxY - pointer.y))
         if !panel.isVisible { panel.orderFrontRegardless() }
         view.needsDisplay = true
         if Date().timeIntervalSince(lastWindowRefresh) >= 0.15 {
             lastWindowRefresh = Date(); refreshGhost()
         }
-        if ghost.isVisible, let point = ghostMotion.position(at:Date.timeIntervalSinceReferenceDate) { ghost.setFrameOrigin(point) }
+        if ghost.isVisible, let point = ghostMotion.position(at:Date.timeIntervalSinceReferenceDate) {
+            // Lean a little into horizontal travel, then settle upright.
+            let dx = lastGhostX.map { point.x - $0 } ?? 0
+            lastGhostX = point.x
+            ghostView.tilt += (max(-9,min(9,dx * 0.8)) - ghostView.tilt) * 0.18
+            ghost.setFrameOrigin(point)
+        } else { lastGhostX = nil; ghostView.tilt = 0 }
         ghostView.needsDisplay = true
     }
     func refreshGhost() {
@@ -270,7 +368,7 @@ final class ActivityOverlay {
         ghostReason = visible ? "visible" : !onScreen ? "offscreen" : result != .success ? "hit-test-unavailable" : "occluded"
         guard visible, let primary = NSScreen.screens.first else { ghost.orderOut(nil); return }
         let cocoa = CGPoint(x:point.x,y:primary.frame.maxY-point.y)
-        let origin = NSPoint(x:cocoa.x-9,y:cocoa.y-ghost.frame.height+5)
+        let origin = NSPoint(x:cocoa.x-GhostView.tip.x,y:cocoa.y-ghost.frame.height+GhostView.tip.y)
         ghostMotion.move(to:origin,at:Date.timeIntervalSinceReferenceDate,snap:!ghost.isVisible)
         if let point = ghostMotion.position(at:Date.timeIntervalSinceReferenceDate) { ghost.setFrameOrigin(point) }
         if !ghost.isVisible { ghost.orderFrontRegardless() }
@@ -279,6 +377,7 @@ final class ActivityOverlay {
         ["enabled":enabled,"active":active,"agent":view.agent.name,"app":app?.bundleIdentifier ?? "", "action":view.action,"windowTitle":view.windowTitle,
          "pillVisible":panel.isVisible,"ghostVisible":ghost.isVisible,"ghostFloating":ghost.isVisible && ghostMotion.isFloating(at:Date.timeIntervalSinceReferenceDate),"ghostReason":ghostReason,"expanded":view.expanded,"stackRow":row,
          "nonActivating":!panel.canBecomeKey && !panel.canBecomeMain && !ghost.canBecomeKey,
+         "paused":paused,"approvalPending":approvals.pending != nil,"steps":view.steps.count,"controlsInteractive":!panel.ignoresMouseEvents,
          "clickThrough":panel.ignoresMouseEvents && ghost.ignoresMouseEvents,
          "pillWindowId":panel.windowNumber,"ghostWindowId":ghost.windowNumber,
          "pillFrame":["screenY":(NSScreen.screens.first?.frame.maxY ?? 0)-panel.frame.maxY,"x":panel.frame.minX,"y":panel.frame.minY,"width":panel.frame.width,"height":panel.frame.height]]

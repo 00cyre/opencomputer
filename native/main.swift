@@ -40,6 +40,7 @@ final class Computer {
     var webEnabled: Set<pid_t> = []
     let defaultWait: Int
     let log = ActionLog(ProcessInfo.processInfo.environment)
+    let approvalPolicy = ApprovalPolicy(ProcessInfo.processInfo.environment["OPENCOMPUTER_CONFIRM"])
     static let observed = [kAXRoleAttribute,kAXSubroleAttribute,kAXTitleAttribute,kAXDescriptionAttribute,kAXIdentifierAttribute,kAXValueAttribute,
                            kAXEnabledAttribute,kAXFocusedAttribute,kAXSelectedAttribute,kAXPlaceholderValueAttribute,kAXPositionAttribute,kAXSizeAttribute,kAXChildrenAttribute]
     static let rowRoles: Set<String> = [kAXListRole,kAXTableRole,kAXOutlineRole,kAXScrollAreaRole,"AXCollection"]
@@ -51,6 +52,8 @@ final class Computer {
         allowed = Set((env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
         log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
+        // After the person had control, element IDs from before are stale: the agent must look again.
+        overlay.onResume = { [weak self] in self?.snapshots = [:]; self?.captures = [:] }
     }
     static let version = "0.4.4"
     func permit(_ request: [String: Any]) throws -> String {
@@ -425,6 +428,7 @@ final class Computer {
     }
     func open(_ request: [String:Any]) async throws -> [String:Any] {
         let bundle = try permit(request)
+        try overlay.ensureNotPaused(NSRunningApplication.runningApplications(withBundleIdentifier:bundle).first)
         guard let location = NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { try fail("APP_NOT_FOUND","No installed app has bundle ID \(bundle).") }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
@@ -445,6 +449,34 @@ final class Computer {
         } catch let error as Failure { focus.cancel(); throw error }
         catch { focus.cancel(); try fail("OPEN_FAILED","Could not open \(bundle): \(error.localizedDescription)") }
     }
+    /// Waits for the person's answer on the activity card before an action OPENCOMPUTER_CONFIRM covers.
+    func approve(_ method: String, _ request: [String:Any], app: NSRunningApplication, item: AXUIElement?, reason: String) async throws {
+        guard overlay.enabled else {
+            throw Failure(code:"APPROVAL_UNAVAILABLE",message:"OPENCOMPUTER_CONFIRM asks the person before this action, but OPENCOMPUTER_OVERLAY=0 hides the indicator where they answer. Nothing was dispatched. Ask the person to enable the overlay or change OPENCOMPUTER_CONFIRM.",details:["dispatched":false])
+        }
+        let name = item.map { label($0) } ?? ""
+        let what: String
+        switch method {
+        case "pressKey": what = "press \(cleanLabel(request["key"] as? String ?? "a key",limit:24))"
+        case "setValue": what = "change “\(name)”"
+        case "typeText": what = "type into “\(name)”"
+        case "scroll": what = "scroll “\(name)”"
+        default: what = "click “\(name)”"
+        }
+        // The key covers everything the action would do, so an answer never carries over to another action.
+        let fields = request.filter { $0.key != "waitMs" }
+        let key = (try? JSONSerialization.data(withJSONObject:fields,options:[.sortedKeys])).flatMap { String(data:$0,encoding:.utf8) } ?? UUID().uuidString
+        // Waiting for an answer and for the person to pause must fit in the client's 20 s request timeout.
+        let wait = min(10000,max(0,request["waitMs"] as? Int ?? defaultWait))
+        // The card already names the app and window, so the detail is just the reason.
+        let outcome = await overlay.requestApproval(key:key,title:"\(overlay.view.agent.name) wants to \(what)",detail:reason,wait:max(3,16 - Double(wait)/1000))
+        try overlay.ensureNotPaused(app)
+        switch outcome {
+        case .approved: note?.merge(["approved":true])
+        case .denied: throw Failure(code:"APPROVAL_DENIED",message:"The person declined this action on screen, so nothing was dispatched. Do not retry it; ask them in chat how to proceed.",details:["dispatched":false])
+        case .waiting: throw Failure(code:"APPROVAL_PENDING",message:"Waiting for the person to approve this action on the activity indicator; nothing was dispatched. Tell them in chat what you are waiting for, then retry the same call: it runs once they press Allow.",details:["dispatched":false,"retryAfterMs":3000])
+        }
+    }
     // The request being handled; requests are serialized, so there is at most one.
     var note: Note?
     func handle(_ request: [String: Any]) async throws -> [String: Any] {
@@ -453,11 +485,13 @@ final class Computer {
         let note = Note(method,request)
         self.note = note
         defer { self.note = nil }
+        let serial = overlay.stepSerial
         do {
             let result = try await dispatch(request)
             log.write(note.finish(result))
             return result
         } catch let error as Failure {
+            overlay.settle(since:serial,code:error.code)
             log.write(note.failed(error.code,error.message,error.details))
             throw error
         } catch {
@@ -469,7 +503,7 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "approvals":approvalPolicy.summary, "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
@@ -602,7 +636,11 @@ final class Computer {
             run = { for _ in 0..<pages { try plan.1() }; return ["delivery":plan.0] }
         default: try fail("UNKNOWN_METHOD", method)
         }
+        try overlay.ensureNotPaused(app)
         overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))")
+        if let reason = approvalPolicy.reason(method:method,bundle:app.bundleIdentifier ?? "",label:item.map { label($0) },key:request["key"] as? String,action:request["action"] as? String) {
+            try await approve(method,request,app:app,item:item,reason:reason)
+        }
         var before = focus.begin(target:pid)
         var decision = interaction.assess(app,element:item,intrusive:intrusive,foreground:before)
         let wait = min(10000,max(0,request["waitMs"] as? Int ?? defaultWait))
@@ -622,6 +660,8 @@ final class Computer {
             details["waitedMs"] = wait
             throw Failure(code:"USER_BUSY",message:decision.message + " Nothing was dispatched or queued. Retry after retryAfterMs; the snapshot is still valid.",details:details)
         }
+        // The person may have pressed Take over while the action waited.
+        if overlay.paused { focus.cancel(); try overlay.ensureNotPaused(app) }
         if wait > 0 { overlay.track(app,element:item,action:"\(verb) \(item.map { label($0) } ?? (app.localizedName ?? "app"))") }
         // The person may have switched tabs or pages while the action waited for a pause.
         do {

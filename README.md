@@ -33,7 +33,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 | Compact outlines with element IDs that stay valid across actions. | Clicks are accessibility presses; keys go to the target process only. Your pointer never moves. |
 | Window screenshots, including covered windows. | Captures are scoped to the selected app's window. |
 | Native actions with verification metadata. | An app that brings itself forward is sent back; your foreground app is restored. |
-| Agent identity and current action. | Three animated dots expand on hover; a ghost cursor marks the visible target. |
+| Clear refusals when the person takes over or declines. | Three dots open into a card with the agent's recent steps, **Take over**, and **Allow / Deny**; a named ghost cursor marks the target. |
 
 ## Get started
 
@@ -63,11 +63,17 @@ Ask your agent to inspect a disposable TextEdit document. Have it read the curre
 
 ## See what your agent is doing
 
-A small **three-dot animation** sits at the top right while an agent has an app in use. Hover to expand it into **AI icon → app icon**, the agent/app names, current window or browser-tab title, and latest action. Move away to collapse it. Multiple agents get separate, stacked indicators. Icons come from installed apps.
+A small **three-dot glass pill** sits at the top right while an agent has an app in use. Hover and it opens into a card: the app's icon badged with the agent, "Claude is using Notes", the window or browser-tab title, elapsed time, and the **last three steps** as a live timeline. Move away to collapse it. Multiple agents get separate, stacked indicators. Icons come from installed apps.
 
-![Expanded activity indicator from the live macOS UI test](docs/assets/activity-expanded.png)
+![Activity card from the live macOS UI test](docs/assets/activity-expanded.png)
 
-The colored ghost cursor eases between targets and gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
+The ghost cursor wears the agent's colour and name tag, eases between targets, leans into its motion, and dips with a ripple when an action lands. It gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
+
+## Stay in charge
+
+**Take over** on the card pauses the agent: its actions are refused with `PAUSED_BY_USER`, nothing is sent, until you press **Resume**. To approve consequential actions first, set `OPENCOMPUTER_CONFIRM`: `sensitive` asks before buttons like Send, Pay, or Delete and before Return; a bundle ID asks before everything in that app; `all` asks before every action. The card opens with **Deny** and **Hold to allow**, and the agent is told to wait for you. [How it works](docs/ACTIVITY.md#approve-before-it-acts).
+
+![Approval question on the activity card](docs/assets/activity-approval.png)
 
 ## Work alongside your agent
 
@@ -100,7 +106,8 @@ Element IDs stay valid across actions until the next full observe of that app; o
 - **Agent connections:** local MCP over stdio, plus a JavaScript client with serialized requests and bounded timeouts.
 - **Text, keys, and scrolling:** insertion at the caret, typed text and shortcuts delivered to the target process only, and page scrolling.
 - **Fast reads:** batched attribute reads return a typical thousand-element window in well under a second, as a compact outline with `query` search.
-- **Activity and focus protection:** hover-to-expand dots, visible-target ghost cursor, window-aware interaction checks, and foreground restoration when an app activates itself.
+- **Activity and focus protection:** hover-to-open activity card with a step timeline, visible-target ghost cursor, window-aware interaction checks, and foreground restoration when an app activates itself.
+- **Take over and approvals:** pause any agent from the card, and approve sends, payments, posts, and deletes before they happen.
 - **Any agent:** each MCP client runs its own server, so several agents can work at once.
 
 **Not implemented:** hover, drag, right-click, pixel-exact clicks on canvases, browser DOM automation, Windows/Linux, and locked-screen operation. Canvas-only controls, minimized windows, secure fields, and apps with incomplete accessibility support may not work. Keys reach the target app's own focused control, and some apps ignore keys while in the background. An app can still bring itself forward for a moment before the foreground is handed back; public macOS APIs cannot prevent that. Each agent host needs its own Accessibility and Screen Recording approval. [Compatibility and acceptance checks](docs/TESTING.md).
