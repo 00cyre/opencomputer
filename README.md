@@ -1,6 +1,6 @@
 <p align="center"><img src="docs/assets/hero.svg" alt="OpenComputer — let your agent work. Keep your desktop." width="100%"></p>
 
-<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
+<p align="center"><a href="https://github.com/00cyre/opencomputer/releases/download/v0.5.1/OpenComputer-0.5.1-macOS.zip"><img src="docs/assets/download.svg" alt="Download OpenComputer for macOS" width="320"></a></p>
 
 <p align="center"><a href="#watch-it-work">Watch demo</a> · <a href="#get-started">Get started</a> · <a href="docs/INSTALL.md">Connect your agent</a> · <a href="docs/API.md">API reference</a> · <a href="docs/BENCHMARKS.md">Claude &amp; Grok benchmarks</a></p>
 
@@ -41,7 +41,7 @@ Inspired by the app-scoped workflow of [ChatGPT Computer Use](https://learn.chat
 
 **macOS 14+ · Node.js 22+ · Apple Silicon or Intel**
 
-1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.5.0/OpenComputer-0.5.0-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
+1. **[Download the runtime ZIP](https://github.com/00cyre/opencomputer/releases/download/v0.5.1/OpenComputer-0.5.1-macOS.zip)** and extract it somewhere permanent. It includes the universal native helper; Node.js is installed separately.
 2. In that folder, run `node bin/opencomputer.mjs doctor`. Approve Accessibility and Screen Recording for the launching host in **System Settings → Privacy & Security**, then restart that host if needed. [Permission help](docs/INSTALL.md#macos-permissions).
 3. Add the MCP server to your agent using its documented configuration. Start with one app you intend to automate:
 
@@ -69,7 +69,7 @@ A small **three-dot glass pill** sits at the top right while an agent has an app
 
 ![Activity card from the live macOS UI test](docs/assets/activity-expanded.png)
 
-The ghost cursor wears the agent's colour and name tag, eases between targets, leans into its motion, and dips with a ripple when an action lands. It gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
+The ghost cursor looks like a real Mac pointer with the agent's name tag beside it. It glides between targets on a slight arc, becomes a hand when it presses something and a text cursor when it types. It gently floats while idle. It appears at the agent’s target while that part of its window is visible. It follows window movement and disappears when covered, hidden, or minimized. Both overlays stay above ordinary windows, pass clicks through, and cannot become the active window. They never move your real pointer. The agent calls `release` when finished to remove them. [Behavior and settings](docs/ACTIVITY.md).
 
 ## Stay in charge
 

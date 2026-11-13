@@ -74,6 +74,10 @@ final class ActivityOverlay {
     var offset: CGFloat = 0
     var timer: Timer?
     var ghostMotion = GhostMotion()
+    /// The pointer shape for the current action, shown once the ghost reaches its target.
+    var ghostTarget = GhostView.Kind.arrow
+    /// A press still to show when the ghost arrives.
+    var pressPending = false
     var lastGhostX: CGFloat?
     var enabled = ProcessInfo.processInfo.environment["OPENCOMPUTER_OVERLAY"] != "0"
     var registryReady = false
@@ -125,7 +129,7 @@ final class ActivityOverlay {
         ghostView.tint = view.agent.color; ghostView.name = view.agent.name
         view.needsDisplay = true; ghostView.needsDisplay = true
     }
-    func track(_ target: NSRunningApplication, element: AXUIElement? = nil, title: String? = nil, captureWindowID: CGWindowID? = nil, captureFrame: CGRect? = nil, action: String) {
+    func track(_ target: NSRunningApplication, element: AXUIElement? = nil, title: String? = nil, captureWindowID: CGWindowID? = nil, captureFrame: CGRect? = nil, pointer: GhostView.Kind = .arrow, action: String) {
         let changed = app?.processIdentifier != target.processIdentifier
         if !active { view.startedAt = Date(); view.steps = [] }
         app = target; active = true
@@ -152,7 +156,9 @@ final class ActivityOverlay {
         if let captureWindowID = captureWindowID { windowID = captureWindowID }
         if let element = element, let rect = elementFrame(element), let window = window, let frame = elementFrame(window) {
             pointOffset = CGPoint(x:rect.midX-frame.minX,y:rect.midY-frame.minY)
-            ghostView.pulseUntil = Date().addingTimeInterval(0.6)
+            ghostTarget = pointer; pressPending = pointer == .hand
+        } else if element == nil {
+            ghostTarget = .arrow; pressPending = false
         }
         view.action = cleanLabel(action); view.blocked = false
         record(view.action)
@@ -226,12 +232,25 @@ final class ActivityOverlay {
             try? await Task.sleep(nanoseconds:100_000_000)
         }
     }
+    /// Roles whose value is text, where typing and keys show a text cursor.
+    static let textRoles: Set<String> = ["AXTextField","AXTextArea","AXComboBox"]
+    /// The pointer shape an action shows on arrival.
+    static func pointer(method: String, action: String? = nil, role: String? = nil) -> GhostView.Kind {
+        switch method {
+        case "click", "clickPoint": return .hand
+        case "performAction": return ApprovalPolicy.presses.contains(action ?? "") ? .hand : .arrow
+        case "typeText": return .text
+        case "setValue", "pressKey": return textRoles.contains(role ?? "") ? .text : .arrow
+        default: return .arrow
+        }
+    }
     func release() {
         active = false; app = nil; window = nil; pointOffset = nil; windowID = nil
         panel.orderOut(nil); ghost.orderOut(nil); view.expanded = false
         revealFrom = 0; revealTo = 0; view.reveal = 0; cardHeight = 0
         approvals.cancel(); view.approval = nil; view.steps = []; view.blocked = false
         ghostMotion = GhostMotion(); lastGhostX = nil
+        ghostTarget = .arrow; pressPending = false; ghostView.kind = .arrow
         if registryReady { try? FileManager.default.removeItem(at:sessionURL) }
     }
     func shutdown() { timer?.invalidate(); timer = nil; release() }
@@ -335,6 +354,11 @@ final class ActivityOverlay {
             lastGhostX = point.x
             ghostView.tilt += (max(-9,min(9,dx * 0.8)) - ghostView.tilt) * 0.18
             ghost.setFrameOrigin(point)
+            // The arrow travels; on arrival it becomes a hand for a press or a text cursor for typing.
+            let now = Date.timeIntervalSinceReferenceDate
+            let arrived = now - ghostMotion.startedAt >= ghostMotion.duration
+            ghostView.kind = arrived ? ghostTarget : .arrow
+            if arrived && pressPending { pressPending = false; ghostView.pulseUntil = Date().addingTimeInterval(0.6) }
         } else { lastGhostX = nil; ghostView.tilt = 0 }
         ghostView.needsDisplay = true
     }

@@ -1,6 +1,6 @@
 {
   "name": "@00cyre/opencomputer",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "App-scoped background computer use for macOS. JavaScript API and local MCP server.",
   "type": "module",
   "exports": "./src/computer.mjs",

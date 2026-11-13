@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.1 — 2026-11-13
+
+The agent's cursor now looks and moves like a real Mac pointer.
+
+- **System-style pointer.** Black with a white halo and a soft shadow, so it reads on light and dark content, with the agent's name tag beside it in the agent's colour. The gradient arrow and the ripple are gone.
+- **Changes shape on arrival.** It travels as an arrow and becomes a hand for clicks and presses (with a small press as the action lands) or a text cursor for typing, and for values and keys sent to text fields.
+- **Curved path.** It moves along a slight upward arc (9% of the distance, at most 36 points; vertical moves bow left) instead of a straight line, with the same easing and no overshoot.
+- The live UI test checks the three shapes and captures them (35 assertions); the Overlay screenshots workflow commits `ghost-cursor-hand.png` and `ghost-cursor-text.png` too. Motion tests cover the arc (12 checks).
+
+Validation: the helper compiles for arm64 and x86_64 in CI, the motion tests pass there, and the live overlay UI test passes in dark and light on a GitHub macOS runner. Not yet checked on a Retina display.
+
 ## 0.5.0 — 2026-11-13
 
 Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app. Agents also get a Chrome of their own, and the activity indicator lets the person take over or approve what matters.

@@ -5,8 +5,7 @@
 <radialGradient id="glow" cx="78%" cy="38%" r="55%"><stop offset="0" stop-color="#e5ecd9"/><stop offset="1" stop-color="#f4f3e9" stop-opacity="0"/></radialGradient>
 <filter id="lift" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#233d2c" flood-opacity=".16"/><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#233d2c" flood-opacity=".08"/></filter>
 <filter id="card" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0b120d" flood-opacity=".32"/></filter>
-<filter id="pointer" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000" flood-opacity=".32"/></filter>
-<linearGradient id="agent" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2b394"/><stop offset="1" stop-color="#ed996e"/></linearGradient>
+<filter id="pointer" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1" stdDeviation="1.3" flood-color="#000" flood-opacity=".24"/></filter>
 <linearGradient id="wash" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ed996e" stop-opacity=".15"/><stop offset="1" stop-color="#ed996e" stop-opacity="0"/></linearGradient>
 </defs>
 <rect width="1280" height="560" rx="28" fill="#f4f3e9"/><rect width="1280" height="560" rx="28" fill="url(#grid)"/><rect width="1280" height="560" rx="28" fill="url(#glow)"/>
@@ -38,13 +37,15 @@
 <rect x="644" y="300" width="380" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="322" width="420" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="344" width="300" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="366" width="350" height="9" rx="4.5" fill="#e6ebde"/>
 <rect x="1004" y="428" width="96" height="34" rx="17" fill="#233d2c"/><text x="1052" y="450" text-anchor="middle" fill="#f4f3e9" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="14" font-weight="600">Send</text>
 
-<!-- The agent's cursor: arrow, ripple, name tag -->
-<circle cx="1040" cy="447" r="17" fill="#ed996e" fill-opacity=".14" stroke="#ed996e" stroke-opacity=".55" stroke-width="2"/>
-<g transform="translate(1040 447)" filter="url(#pointer)">
-<path d="M0 0V17.2L4.4 13.1L7.5 19.8L10.6 18.4L7.6 11.8H13.4Z" transform="scale(1.35)" fill="#fff" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"/>
-<path d="M0 0V17.2L4.4 13.1L7.5 19.8L10.6 18.4L7.6 11.8H13.4Z" transform="scale(1.35)" fill="url(#agent)" stroke="#b9714e" stroke-opacity=".55" stroke-width=".6" stroke-linejoin="round"/>
-<rect x="16" y="27" width="64" height="25" rx="12.5" fill="#ed996e" stroke="#fff" stroke-opacity=".9" stroke-width="2"/>
-<text x="48" y="44" text-anchor="middle" fill="#161616" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="13.5" font-weight="700">Claude</text>
+<!-- The agent's pointer: a hand pressing Send, with its name tag -->
+<g transform="translate(1040 447)">
+<g transform="scale(1.4)">
+<g fill="#fff" stroke="#fff" stroke-width="2.6" stroke-linejoin="round" filter="url(#pointer)"><rect x="-1.7" y="0" width="3.4" height="11" rx="1.7"/><rect x="1.5" y="5.2" width="3.2" height="7" rx="1.6"/><rect x="4.5" y="6.2" width="3" height="6.6" rx="1.5"/><rect x="7.3" y="7.6" width="2.7" height="5.6" rx="1.35"/><rect x="-1.7" y="9.4" width="11.7" height="8.6" rx="3.6"/><rect x="-1.6" y="-3.6" width="3.2" height="7.2" rx="1.6" transform="translate(-2.6 11.6) rotate(-42)"/></g>
+<g fill="#0a0a0c"><rect x="-1.7" y="0" width="3.4" height="11" rx="1.7"/><rect x="1.5" y="5.2" width="3.2" height="7" rx="1.6"/><rect x="4.5" y="6.2" width="3" height="6.6" rx="1.5"/><rect x="7.3" y="7.6" width="2.7" height="5.6" rx="1.35"/><rect x="-1.7" y="9.4" width="11.7" height="8.6" rx="3.6"/><rect x="-1.6" y="-3.6" width="3.2" height="7.2" rx="1.6" transform="translate(-2.6 11.6) rotate(-42)"/></g>
+<path d="M1.6 7.6V11.6M4.6 8.4V11.6M7.4 9.6V11.6" stroke="#fff" stroke-opacity=".9" stroke-width=".8" stroke-linecap="round"/>
+</g>
+<rect x="17" y="29" width="64" height="25" rx="12.5" fill="#ed996e" stroke="#fff" stroke-opacity=".9" stroke-width="2" filter="url(#pointer)"/>
+<text x="49" y="46" text-anchor="middle" fill="#161616" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="13.5" font-weight="700">Claude</text>
 </g>
 
 </g>
