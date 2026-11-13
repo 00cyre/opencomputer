@@ -463,13 +463,13 @@ final class Computer {
         case "scroll": what = "scroll “\(name)”"
         default: what = "click “\(name)”"
         }
-        let place = [app.localizedName ?? app.bundleIdentifier ?? "",overlay.view.windowTitle].filter { !$0.isEmpty }.joined(separator:" · ")
         // The key covers everything the action would do, so an answer never carries over to another action.
         let fields = request.filter { $0.key != "waitMs" }
         let key = (try? JSONSerialization.data(withJSONObject:fields,options:[.sortedKeys])).flatMap { String(data:$0,encoding:.utf8) } ?? UUID().uuidString
         // Waiting for an answer and for the person to pause must fit in the client's 20 s request timeout.
         let wait = min(10000,max(0,request["waitMs"] as? Int ?? defaultWait))
-        let outcome = await overlay.requestApproval(key:key,title:"\(overlay.view.agent.name) wants to \(what)",detail:"\(place) · \(reason)",wait:max(3,16 - Double(wait)/1000))
+        // The card already names the app and window, so the detail is just the reason.
+        let outcome = await overlay.requestApproval(key:key,title:"\(overlay.view.agent.name) wants to \(what)",detail:reason,wait:max(3,16 - Double(wait)/1000))
         try overlay.ensureNotPaused(app)
         switch outcome {
         case .approved: note?.merge(["approved":true])

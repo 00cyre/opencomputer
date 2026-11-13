@@ -349,6 +349,7 @@ final class GhostView: NSView {
     static let size = NSSize(width:190,height:68)
     /// Where the arrow's tip sits in the view (flipped coordinates).
     static let tip = NSPoint(x:20,y:18)
+    static let arrowScale: CGFloat = 1.2
     var tint = NSColor.systemTeal
     var name = "Agent"
     /// Set when an action lands on a control; drives the press dip and ripple.
@@ -388,7 +389,8 @@ final class GhostView: NSView {
         }
 
         NSGraphicsContext.saveGraphicsState()
-        let scale = 1 - 0.14 * sin(.pi * min(1, press / 0.45))
+        // A touch larger than the system pointer so the agent's cursor reads as its own.
+        let scale = GhostView.arrowScale * (1 - 0.14 * sin(.pi * min(1, press / 0.45)))
         let transform = NSAffineTransform()
         transform.translateX(by:tip.x,yBy:tip.y)
         transform.rotate(byDegrees:tilt)
@@ -400,14 +402,14 @@ final class GhostView: NSView {
         NSColor.white.setStroke(); arrow.lineWidth = 3.4; arrow.stroke()
         NSColor.white.setFill(); arrow.fill()
         NSGraphicsContext.restoreGraphicsState()
-        NSGradient(starting:tint.blended(withFraction:0.28,of:.white) ?? tint,ending:tint)?.draw(in:arrow,angle:90)
+        NSGradient(starting:tint.blended(withFraction:0.16,of:.white) ?? tint,ending:tint)?.draw(in:arrow,angle:90)
         (tint.shadow(withLevel:0.28) ?? tint).withAlphaComponent(0.55).setStroke(); arrow.lineWidth = 0.6; arrow.stroke()
         NSGraphicsContext.restoreGraphicsState()
 
         // Name tag, tucked under the arrow's tail.
         let font = NSFont.systemFont(ofSize:11,weight:.semibold)
-        let labelWidth = min(GhostView.size.width - tip.x - 14 - 6, textWidth(name,font) + 16)
-        let tag = NSRect(x:tip.x + 12,y:tip.y + 20,width:labelWidth,height:19)
+        let labelWidth = min(GhostView.size.width - tip.x - 14 - 8, textWidth(name,font) + 16)
+        let tag = NSRect(x:tip.x + 14,y:tip.y + 24,width:labelWidth,height:19)
         let pill = NSBezierPath(roundedRect:tag,xRadius:9.5,yRadius:9.5)
         NSGraphicsContext.saveGraphicsState()
         shadow.set()

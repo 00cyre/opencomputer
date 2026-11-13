@@ -7,7 +7,8 @@ struct OverlayUITest {
     static func capture(_ panel: NSPanel, to file: URL) async throws -> Data {
         let content = try await SCShareableContent.excludingDesktopWindows(true,onScreenWindowsOnly:false)
         guard let window = content.windows.first(where:{$0.windowID == CGWindowID(panel.windowNumber) && $0.owningApplication?.processID == getpid()}) else { throw Failure(code:"UI_TEST",message:"Own overlay window missing") }
-        let config = SCStreamConfiguration(); config.width = Int(window.frame.width * 2); config.height = Int(window.frame.height * 2); config.showsCursor = false
+        let scale = panel.backingScaleFactor
+        let config = SCStreamConfiguration(); config.width = Int(window.frame.width * scale); config.height = Int(window.frame.height * scale); config.showsCursor = false
         let image: CGImage = try await SCScreenshotManager.captureImage(contentFilter:SCContentFilter(desktopIndependentWindow:window),configuration:config)
         guard let data = NSBitmapImageRep(cgImage:image).representation(using:.png,properties:[:]) else { throw Failure(code:"UI_TEST",message:"PNG encoding failed") }
         try data.write(to:file)
@@ -36,6 +37,11 @@ struct OverlayUITest {
             var checks = 0
             func check(_ condition: Bool, _ message: String) throws {
                 guard condition else { throw Failure(code:"UI_TEST",message:message) }; checks += 1
+            }
+            // Animations run on the overlay's timer, which a busy CI runner can delay: wait for the state, not a fixed time.
+            func waitUntil(_ seconds: Double = 3, _ condition: () -> Bool) async throws {
+                let end = Date().addingTimeInterval(seconds)
+                while !condition() && Date() < end { try await Task.sleep(nanoseconds:50_000_000) }
             }
             do {
                 try FileManager.default.createDirectory(at:dir,withIntermediateDirectories:true)
@@ -71,7 +77,7 @@ struct OverlayUITest {
                 _ = try await capture(overlay.ghost,to:dir.appendingPathComponent("ghost-cursor-press.png"))
                 try check(overlay.ghostView.name == "Claude","The ghost cursor carries the agent's name tag")
                 pointer = NSPoint(x:overlay.panel.frame.midX,y:overlay.panel.frame.midY)
-                try await Task.sleep(nanoseconds:450_000_000)
+                try await waitUntil { overlay.view.expanded && overlay.view.reveal >= 1 && overlay.panel.frame.width == ActivityView.cardWidth }
                 try check(overlay.view.expanded && overlay.panel.frame.width == ActivityView.cardWidth,"Hover expands activity details")
                 try check(overlay.panel.frame.height == overlay.view.expandedHeight,"The card fits its three steps")
                 try check(overlay.view.agent.name == "Claude" && overlay.view.appName == "OpenComputer Fixture","Expanded details identify the right agent and app")
@@ -82,7 +88,7 @@ struct OverlayUITest {
                 _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-expanded.png"))
                 guard let takeOver = overlay.view.buttonFrames().first(where:{ $0.0 == .takeOver })?.1 else { throw Failure(code:"UI_TEST",message:"Take over button missing") }
                 pointer = NSPoint(x:overlay.panel.frame.minX + takeOver.midX,y:overlay.panel.frame.maxY - takeOver.midY)
-                try await Task.sleep(nanoseconds:100_000_000)
+                try await waitUntil { overlay.view.hovered == .takeOver }
                 try check(overlay.view.hovered == .takeOver,"Hovering Take over highlights it")
 
                 // Take over pauses the session until Resume; the agent's actions are refused meanwhile.
@@ -97,33 +103,35 @@ struct OverlayUITest {
                 try check(!overlay.paused && overlay.view.buttons == [.takeOver],"Resume hands control back")
 
                 pointer = NSPoint(x:-10000,y:-10000)
-                try await Task.sleep(nanoseconds:700_000_000)
+                try await waitUntil { !overlay.view.expanded && overlay.panel.frame.width == ActivityView.pillWidth }
                 try check(!overlay.view.expanded && overlay.panel.frame.width == ActivityView.pillWidth,"Leaving the pill collapses it")
                 try check(overlay.panel.ignoresMouseEvents,"Collapsed dots pass clicks through")
 
                 // An approval question opens the card by itself and waits for Allow or Deny.
                 let key = "click-send"
-                let unanswered = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"OpenComputer Fixture · “Send” looks like it can’t be undone",wait:0.5)
+                let unanswered = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"“Send” looks like it can’t be undone",wait:0.5)
                 try check(unanswered == .waiting && overlay.view.approval != nil,"Unanswered approval keeps waiting")
-                try await Task.sleep(nanoseconds:450_000_000)
+                try await waitUntil { overlay.view.expanded && overlay.view.reveal >= 1 && !overlay.panel.ignoresMouseEvents }
                 try check(overlay.view.expanded && overlay.view.buttons == [.deny,.allow] && !overlay.panel.ignoresMouseEvents,"Approval opens the card with Deny and Allow")
                 // Allow counts only after a held press, and is never offered to assistive apps.
-                overlay.view.pressed = .allow; overlay.view.holdStarted = Date()
+                let holdStart = Date()
+                overlay.view.pressed = .allow; overlay.view.holdStarted = holdStart
                 try await Task.sleep(nanoseconds:200_000_000)
                 try check(overlay.view.approval != nil,"A short press on Allow approves nothing")
                 _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-approval-hold.png"))
                 try check(!(overlay.view.accessibilityCustomActions() ?? []).contains { $0.name.contains("allow") },"Allow is not an accessibility action")
-                try await Task.sleep(nanoseconds:450_000_000)
+                try await waitUntil { overlay.view.approval == nil && overlay.view.pressed == nil }
+                try check(Date().timeIntervalSince(holdStart) >= ActivityView.holdDuration,"Allow waits for the full hold")
                 try check(overlay.view.approval == nil && overlay.view.pressed == nil,"Holding Allow for half a second answers the question")
                 let held = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"",wait:0.5)
                 try check(held == .approved,"The held Allow approves the waiting action once")
-                _ = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"OpenComputer Fixture · “Send” looks like it can’t be undone",wait:0.3)
-                try await Task.sleep(nanoseconds:450_000_000)
+                _ = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"“Send” looks like it can’t be undone",wait:0.3)
+                try await waitUntil { overlay.view.expanded && overlay.view.reveal >= 1 }
                 _ = try await capture(overlay.panel,to:dir.appendingPathComponent("activity-approval.png"))
                 overlay.press(.allow)
                 let clicked = await overlay.requestApproval(key:key,title:"Claude wants to click “Send”",detail:"",wait:0.5)
                 try check(clicked == .approved,"Allow approves the waiting action once")
-                try await Task.sleep(nanoseconds:700_000_000)
+                try await waitUntil { !overlay.view.expanded }
                 try check(!overlay.view.expanded,"The card closes once answered")
                 overlay.release()
                 try check(!overlay.panel.isVisible && !overlay.ghost.isVisible,"Release removes all UI")

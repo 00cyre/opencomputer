@@ -26,6 +26,8 @@ When a mutation conflicts with your input, the dots turn amber and the current s
 
 **Take over** pauses the session. Until you press **Resume** on the same card, every action and `open` from that agent is refused with `PAUSED_BY_USER` and nothing is sent; observing and screenshots still work, so the agent can see what you changed. The dots become two grey bars while paused. Resuming drops the session's snapshots, so the agent's next action answers `STALE_SNAPSHOT` and it has to look again at what you changed. The pause outlives `release`: an agent cannot end it by finishing its session, and if it tries to act again the card reappears with **Resume**. Each helper (each connected agent) has its own pause.
 
+![Paused card with Resume](assets/activity-paused.png)
+
 ## Approve before it acts
 
 Set `OPENCOMPUTER_CONFIRM` in the server's environment to have the card ask before consequential actions:
@@ -38,7 +40,9 @@ Set `OPENCOMPUTER_CONFIRM` in the server's environment to have the card ask befo
 
 Entries combine with commas, for example `sensitive,com.apple.MobileSMS`. Unset or `off` asks for nothing.
 
-The card opens by itself with "Claude wants to click “Send”", the app, window, and reason, and **Deny** / **Hold to allow**. Allow counts only after you hold it for half a second (it fills as you hold); a quick click, sliding off, or anything other than your mouse does nothing. Take over, Resume, and Deny are also offered to VoiceOver as actions on the indicator; Allow deliberately is not, so no assistive or automation tool can grant permission on your behalf. The action waits up to about 15 seconds for your answer (less when the request also allows a long `waitMs`, so the whole request stays inside the client's 20-second timeout). Without an answer it returns `APPROVAL_PENDING` with nothing sent and the question stays up; when the agent retries the same call after you press **Allow**, it runs once. **Deny** returns `APPROVAL_DENIED`. An answer applies only to the exact action it was asked about, unanswered questions lapse after two minutes, and approvals nobody used lapse after one. The action log records `approved: true` on actions that ran after your OK.
+The card opens by itself with "Claude wants to click “Send”" and the reason under the app and window it names, with **Deny** / **Hold to allow**. Allow counts only after you hold it for half a second (it fills as you hold); a quick click, sliding off, or anything other than your mouse does nothing. Take over, Resume, and Deny are also offered to VoiceOver as actions on the indicator; Allow deliberately is not, so no assistive or automation tool can grant permission on your behalf. The action waits up to about 15 seconds for your answer (less when the request also allows a long `waitMs`, so the whole request stays inside the client's 20-second timeout). Without an answer it returns `APPROVAL_PENDING` with nothing sent and the question stays up; when the agent retries the same call after you press **Allow**, it runs once. **Deny** returns `APPROVAL_DENIED`. An answer applies only to the exact action it was asked about, unanswered questions lapse after two minutes, and approvals nobody used lapse after one. The action log records `approved: true` on actions that ran after your OK.
+
+![Approval question with Deny and Hold to allow](assets/activity-approval.png)
 
 Label matching is a heuristic, not an understanding of intent: a button named "Go" that pays will not be caught, and "Remove filter" will be asked about. Use per-app entries for apps where every action matters.
 
