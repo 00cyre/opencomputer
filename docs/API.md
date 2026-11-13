@@ -38,6 +38,17 @@ An explicit `agent` takes priority over MCP `initialize.clientInfo.name`. Identi
 
 `apps: ['*']` explicitly enables all running apps. Each request still names one bundle ID, and snapshots, captures, and actions remain scoped to its process. The default is no app access. This uses the apps and logged-in sessions on the current Mac; it creates no VM and copies no credentials.
 
+## The agent browser
+
+`app: "agent-browser"` names a second Google Chrome instance with its own profile folder (`~/Library/Application Support/OpenComputer/AgentBrowser`; `OPENCOMPUTER_AGENT_PROFILE` moves it). Agents browse there instead of in the person's Chrome:
+
+- `open({app: "agent-browser", url})` starts it in the background, or opens the link as a new tab in its window. The result carries `launched`, `via` (`launch`, `new-tab`, or `handoff`), and `profile`.
+- It runs with occluded-window and renderer backgrounding turned off and the page accessibility tree always on, so it keeps working while covered or behind a fullscreen app.
+- Every other method takes `app: "agent-browser"` like any app. `com.google.Chrome` without a `pid` always means the person's Chrome, and `apps` lists the agent instance as `agent-browser`.
+- It has its own cookies and sign-ins. Sign in once per site in its window; agents never type passwords (`SECURE_FIELD`).
+- While a fullscreen app is in front, `open` on it refuses with `USER_BUSY` and `details.reason: "fullscreen-app"`. Navigate an existing agent tab through its address bar instead.
+- Starting it, or making a window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Keep one agent tab open.
+
 ## Observing
 
 A snapshot contains `snapshot`, `app`, `pid`, `nodes`, `windows`, `truncated`, `elapsedMs`, and `frontmostApp`. Nodes have `id`, `role`, `parent`, available labels/values, `enabled`, `settable`, supported `actions`, and a `frame` in macOS global accessibility coordinates.

@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.5.0 — 2026-11-13
+
+Agents browse in their own Chrome, apart from the person's.
+
+- **`agent-browser`.** A second Google Chrome instance with its own profile folder (`~/Library/Application Support/OpenComputer/AgentBrowser`, or `OPENCOMPUTER_AGENT_PROFILE`). `open` with `app: "agent-browser"` starts it in the background, or opens the link as a new tab inside it, so agent pages never land in the person's windows and the person's tab switches never move an agent's target. It is launched so that it keeps painting, running timers, and exposing page content while covered, behind other windows, or behind a fullscreen app. New tabs are made through its own accessibility tree and keys posted to its process, so Chrome has no reason to come forward. Sign-ins are its own: sign in once in that window per site.
+- **`com.google.Chrome` means the person's Chrome.** Without an explicit `pid` it never resolves to the agent browser, which `apps` lists as `agent-browser`. Allowing `com.google.Chrome` does not allow the agent browser; `*` or `agent-browser` does.
+- **Fullscreen apps are left alone.** While the app in front is fullscreen or draws a display-sized window (games), `open` on the agent browser refuses with `USER_BUSY` (`reason: "fullscreen-app"`) instead of starting Chrome or opening a tab, because either can bring Chrome over it for a moment. Existing agent tabs still work: navigate one with `setValue` on its address bar and `pressKey` Return.
+- **Screenshots when ScreenCaptureKit stalls.** When ScreenCaptureKit does not answer within 6 s (seen for every window while a fullscreen game ran), the window is taken with the system `screencapture` tool instead for the next two minutes. Results carry `captureTool: "screencapture"`; `clickPoint` works the same on them. `OPENCOMPUTER_CAPTURE=screencapture` forces that path.
+
+Known limit: starting the agent browser, or making it a new window after its last one closed, can bring Chrome forward for a moment before the focus guard hands the foreground back. Start it once and keep one agent tab open.
+
 ## 0.4.4 — 2026-11-12
 
 Open and save panels on big folders, and steadier window choice.
