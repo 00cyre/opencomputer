@@ -8,7 +8,7 @@ You can now see what the agent has been doing, stop it, and approve what matters
 - **Take over.** A button on the card pauses the session. Actions and `open` answer `PAUSED_BY_USER` with nothing sent until you press **Resume**; observing still works. Resuming drops earlier snapshots so the agent looks again. The pause outlives `release`.
 - **Approvals (`OPENCOMPUTER_CONFIRM`).** `sensitive` asks before presses on controls labelled Send, Pay, Delete, Post and similar, and before Return, Enter and cmd+Delete; a bundle ID asks before every action in that app; `all` asks before everything. The card opens with **Deny** / **Hold to allow**: Allow counts only after a half-second held press and is never offered to assistive or automation tools. Unanswered requests return `APPROVAL_PENDING` and run once when retried after Allow; **Deny** returns `APPROVAL_DENIED`. Approved actions are marked in the action log. `status().approvals` shows the rules.
 - **Ghost cursor.** Redrawn with a white outline, soft shadow, colour gradient and the agent's name tag. It leans into horizontal travel and dips with a ripple when an action lands.
-- `npm run test:approval` covers the approval rules and question lifecycle; CI also compiles the UI harness.
+- `npm run test:approval` covers the approval rules and question lifecycle; CI also compiles the UI harness, and a new "Overlay screenshots" workflow runs the live UI test on a GitHub macOS runner and can commit refreshed screenshots to `docs/assets`.
 
 ## 0.4.4 — 2026-11-12
 
