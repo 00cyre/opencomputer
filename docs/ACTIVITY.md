@@ -42,8 +42,6 @@ The card opens by itself with "Claude wants to click “Send”", the app, windo
 
 Label matching is a heuristic, not an understanding of intent: a button named "Go" that pays will not be caught, and "Remove filter" will be asked about. Use per-app entries for apps where every action matters.
 
-![Approval on the card](assets/activity-approval.png)
-
 ## Ghost cursor
 
 ![Ghost cursor](assets/ghost-cursor.png)

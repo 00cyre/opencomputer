@@ -73,8 +73,6 @@ The ghost cursor wears the agent's colour and name tag, eases between targets, l
 
 **Take over** on the card pauses the agent: its actions are refused with `PAUSED_BY_USER`, nothing is sent, until you press **Resume**. To approve consequential actions first, set `OPENCOMPUTER_CONFIRM`: `sensitive` asks before buttons like Send, Pay, or Delete and before Return; a bundle ID asks before everything in that app; `all` asks before every action. The card opens with **Deny** and **Allow**, and the agent is told to wait for you. [How it works](docs/ACTIVITY.md#approve-before-it-acts).
 
-![Approval on the activity card](docs/assets/activity-approval.png)
-
 ## Work alongside your agent
 
 Whatever you do in other apps never blocks the agent. Only work in the same window does: an action then waits a couple of seconds for you to pause, with an amber indicator explaining why, and otherwise returns `USER_BUSY` with nothing sent. If an app brings itself forward when the agent presses something, OpenComputer hands the foreground back to the app you were in. [Signals, thresholds, and limits](docs/API.md#staying-out-of-the-persons-way).
