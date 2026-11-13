@@ -75,3 +75,13 @@ test('observe strips query and format before the helper and honours json',async 
   const json=(await handle(request('tools/call',{name:'observe',arguments:{app:'cc.test',format:'json'}}),client)).result.content[0].text;
   assert.equal(JSON.parse(json).nodes.length,4);
 });
+
+test('agent browser is described to agents', async () => {
+  const {handle} = await import('../src/protocol.mjs');
+  const list = await handle({jsonrpc:'2.0',id:1,method:'tools/list'}, {request: async () => ({})});
+  const open = list.result.tools.find(t => t.name.endsWith('open'));
+  assert.match(open.description, /agent-browser/);
+  assert.match(open.inputSchema.properties.app.description, /agent-browser/);
+  const init = await handle({jsonrpc:'2.0',id:2,method:'initialize',params:{}}, {request: async () => ({}), setClientInfo: async () => {}});
+  assert.match(init.result.instructions, /agent-browser/);
+});

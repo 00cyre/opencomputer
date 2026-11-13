@@ -1,0 +1,50 @@
+name: Live tests and demo
+# Runs the live fixture tests on a macOS runner's desktop session (which has Accessibility
+# and Screen Recording) and records `npm run demo` as a video, kept as a build artifact
+# with the test output. Runs on native, server, and fixture changes, or by hand.
+on:
+  push:
+    paths:
+      - 'native/**'
+      - 'src/**'
+      - 'tests/perception.mjs'
+      - 'tests/integration.mjs'
+      - 'tests/fixture.swift'
+      - 'scripts/demo.mjs'
+      - 'scripts/record-demo.sh'
+      - 'scripts/ci-allow-terminal.sh'
+      - 'scripts/build*.sh'
+      - '.github/workflows/live.yml'
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  live:
+    runs-on: macos-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: npm run build
+      - run: npm run fixture:build
+      - name: Permissions on this runner
+        run: node bin/opencomputer.mjs doctor
+      - name: Live reading and checking features (test:perception)
+        run: npm run test:perception
+      - name: Live integration (test:integration)
+        if: always()
+        run: npm run test:integration
+      - name: Let Terminal run the demo (this runner only)
+        if: always()
+        run: bash scripts/ci-allow-terminal.sh
+      - name: Record the demo
+        if: always()
+        run: bash scripts/record-demo.sh work/demo
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: opencomputer-demo
+          path: work/demo
+          if-no-files-found: warn

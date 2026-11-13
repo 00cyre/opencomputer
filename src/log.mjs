@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {readdir, readFile} from 'node:fs/promises';
 import {homedir} from 'node:os';
 import {join} from 'node:path';
@@ -50,3 +51,53 @@ export function formatEntry(e) {
   const end = e.error ? `${e.outcome ?? 'error'} ${e.error.code}${e.error.details?.reason ? ` (${e.error.details.reason})` : ''}` : (e.outcome ?? 'ok');
   return `${parts.join(' ')} -> ${end}${e.delivery ? ` via ${e.delivery}` : ''}${e.focusRestored ? ', focus restored' : ''}`;
 }
+
+const digest = line => createHash('sha256').update(line, 'utf8').digest('hex').slice(0, 32);
+
+/**
+ * Check the chain in one session log: each line's `prev` must be the start of the SHA-256
+ * of the line before it ("" on the first line). Finds a line edited or removed inside the
+ * file; it cannot tell that lines were cut from the end, or that the whole chain was
+ * rewritten by someone able to write the file. Logs from before 0.5 have no chain.
+ */
+export function verifyChain(text) {
+  const rows = text.split('\n');
+  if (rows.at(-1) === '') rows.pop();
+  let previous = '';
+  for (const [i, row] of rows.entries()) {
+    let entry;
+    try { entry = JSON.parse(row); } catch { return {ok:false, lines:rows.length, line:i + 1, problem:i === rows.length - 1 ? 'the last line is incomplete' : 'a line is not valid JSON'}; }
+    if (entry.prev === undefined) return i === 0 ? {ok:true, chained:false, lines:rows.length} : {ok:false, lines:rows.length, line:i + 1, problem:'a line has no prev field'};
+    if (entry.prev !== previous) return {ok:false, lines:rows.length, line:i + 1, problem:i === 0 ? 'the first line does not start the chain' : 'the line before it was changed or removed'};
+    previous = digest(row);
+  }
+  return {ok:true, chained:rows.length > 0, lines:rows.length};
+}
+
+/** verifyChain for every session log in `dir`, by file name. */
+export async function verifyLogs({dir = logDir()} = {}) {
+  let names;
+  try { names = await readdir(dir); } catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  const out = [];
+  for (const name of names.filter(n => /^session-.*\.jsonl$/.test(n)).sort()) out.push({session:name, ...verifyChain(await readFile(join(dir, name), 'utf8'))});
+  return out;
+}
+
+const acted = new Set(['click','clickPoint','setValue','performAction','pressKey','typeText','scroll','open']);
+/** Per session: who, when, how many actions were sent, refused, and failed, and in which apps. */
+export function summarize(entries) {
+  const sessions = new Map();
+  for (const e of entries) {
+    if (!sessions.has(e.session)) sessions.set(e.session, {session:e.session, agent:e.agent, helperPid:e.helperPid, first:e.time, last:e.time, actions:0, refused:0, failed:0, reads:0, apps:new Set()});
+    const s = sessions.get(e.session);
+    s.last = e.time; s.agent = e.agent ?? s.agent;
+    if (acted.has(e.event)) {
+      if (e.outcome === 'dispatched' || (e.event === 'open' && e.outcome === 'ok')) { s.actions++; if (e.app) s.apps.add(e.app); }
+      else if (e.outcome === 'refused') s.refused++;
+      else if (e.outcome === 'failed') s.failed++;
+    } else if (['observe','screenshot','readText'].includes(e.event)) s.reads++;
+  }
+  return [...sessions.values()].map(s => ({...s, apps:[...s.apps].sort()}));
+}
+/** One line per summarized session. */
+export const formatSummary = s => `${clock(s.first)} to ${clock(s.last).slice(11)} [${s.agent ?? 'Agent'} ${s.helperPid ?? '?'}] ${s.actions} action${s.actions === 1 ? '' : 's'}, ${s.refused} refused, ${s.failed} failed, ${s.reads} read${s.reads === 1 ? '' : 's'}${s.apps.length ? ' in ' + s.apps.join(', ') : ''}`;

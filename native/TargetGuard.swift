@@ -63,9 +63,10 @@ func userActed(since start: Date) -> Bool {
 // page are still the ones it read; otherwise the action is refused with TARGET_CHANGED.
 extension Snapshot {
     func find(_ element: AXUIElement) -> Int? { index[CFHash(element)]?.first { CFEqual(elements[$0],element) } }
-    func note(_ index: Int, parent: Int?, place: Place) {
-        if let parent, parents[index] == nil, parent != index { parents[index] = parent }
-        if places[index] == nil { places[index] = place }
+    // replace: a refresh re-reads the element where it is now.
+    func note(_ index: Int, parent: Int?, place: Place, replace: Bool = false) {
+        if let parent, parents[index] == nil || replace, parent != index { parents[index] = parent }
+        if places[index] == nil || replace { places[index] = place }
     }
     func checkWindow(_ w: Int) throws {
         guard let mark = windows[w] else { return }
@@ -182,9 +183,12 @@ func ancestry(_ pid: pid_t, levels: Int = 3) -> [[String:Any]] {
 // dispatch time. The capture records the window title, size, and page it showed.
 struct Capture {
     let window: CGWindowID
+    // Picture pixels per point, and the picture's top-left corner within the window in
+    // points (non-zero for a zoomed region).
     let scale: CGFloat
     var title: String?
     let size: CGSize
+    var origin = CGPoint.zero
     let time = Date()
     var page: AXUIElement?
     var url: String?
