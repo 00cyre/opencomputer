@@ -20,7 +20,7 @@ Screenshots above are from the real AppKit implementation using synthetic fixtur
 
 Each helper represents one session and its latest target app. Concurrent sessions stack their pills, and an open card pushes the pills below it down. Indicators remain until `release`, server exit, or target-app exit; they do not imply that the model is continuously dispatching an action. A paused focus guard stays visibly paused even after read-only inspection.
 
-When a mutation conflicts with your input, the dots turn amber and the current step explains the wait: editing, clicking, scrolling, a held gesture, or a nearby pointer. The action was not dispatched or queued. A later fresh observation/action rechecks activity; the helper never replays the action by itself. A focus change remains a separate, latched pause. A request that fails after it started a step marks that step with a cross and a short reason, such as "the page changed".
+When a mutation conflicts with your input, the dots turn amber and the current step explains the wait: editing, clicking, scrolling, a held gesture, or a nearby pointer. The action was not dispatched or queued. A later fresh observation/action rechecks activity; the helper never replays the action by itself. If an app brings itself forward during an action, the foreground goes back to the app you were in (see [focus and settings](#focus-and-settings)). A request that fails after it started a step marks that step with a cross and a short reason, such as "the page changed".
 
 ## Take over
 

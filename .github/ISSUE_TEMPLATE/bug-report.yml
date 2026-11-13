@@ -1,0 +1,45 @@
+name: Bug report
+description: Something OpenComputer does is wrong or broken.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Please use disposable data. Never paste API keys, tokens, private screenshots, or authentication logs. Security issues go through [SECURITY.md](https://github.com/00cyre/opencomputer/blob/main/SECURITY.md) instead.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. OPENCOMPUTER_APPS=com.apple.TextEdit
+        2. observe, then click element 12
+        3. ...
+  - type: input
+    id: error
+    attributes:
+      label: Error code or message
+      placeholder: TARGET_CHANGED
+  - type: input
+    id: environment
+    attributes:
+      label: OpenComputer version, macOS version, chip, Node version
+      placeholder: "0.5.0, macOS 15.3, Apple Silicon, Node 22.11"
+    validations:
+      required: true
+  - type: input
+    id: client
+    attributes:
+      label: MCP client or API
+      placeholder: "Claude Code, Grok Build, JavaScript API, ..."
+  - type: textarea
+    id: doctor
+    attributes:
+      label: Output of `node bin/opencomputer.mjs doctor`
+      render: text

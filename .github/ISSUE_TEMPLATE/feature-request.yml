@@ -1,0 +1,19 @@
+name: Feature request
+description: Suggest something OpenComputer should do.
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What are you trying to do?
+      description: The task or app, and where OpenComputer gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+  - type: markdown
+    attributes:
+      value: |
+        Some things are deliberate non-goals for now: Windows and Linux, browser DOM automation, and synthetic mouse events that could move your pointer or take focus. If your idea touches those, say how it would keep the person at the Mac undisturbed.
