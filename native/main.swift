@@ -18,6 +18,8 @@ final class Snapshot {
     var pages: [Int:PageMark] = [:]
     // Role and label as observed, for logging an element that has since gone away.
     var described: [Int:[String:Any]] = [:]
+    // Elements a screenshot with marks labels: pressable, pickable, or editable ones.
+    var interactive: Set<Int> = []
     init(pid: pid_t, bundle: String) { self.pid = pid; self.bundle = bundle }
     func contains(_ element: AXUIElement) -> Bool { index[CFHash(element)]?.contains(where: { CFEqual(elements[$0],element) }) ?? false }
     func register(_ element: AXUIElement) -> Int {
@@ -31,7 +33,9 @@ final class Snapshot {
 
 @MainActor
 final class Computer {
+    // Full access, and read-only access (entries written bundle:read). "*" covers every app.
     let allowed: Set<String>
+    let readable: Set<String>
     let overlay = ActivityOverlay()
     let focus = FocusGuard()
     let interaction = InteractionGuard()
@@ -44,22 +48,38 @@ final class Computer {
                            kAXEnabledAttribute,kAXFocusedAttribute,kAXSelectedAttribute,kAXPlaceholderValueAttribute,kAXPositionAttribute,kAXSizeAttribute,kAXChildrenAttribute]
     static let rowRoles: Set<String> = [kAXListRole,kAXTableRole,kAXOutlineRole,kAXScrollAreaRole,"AXCollection"]
     static let textRoles = [kAXTextFieldRole,kAXTextAreaRole,kAXComboBoxRole,"AXSearchField"]
+    static let marked: Set<String> = [kAXPressAction,kAXPickAction,kAXIncrementAction,kAXConfirmAction,"AXOpen"]
     // Chromium and Firefox build their web accessibility tree only when asked.
     static let browsers = ["com.google.Chrome","com.brave.Browser","com.microsoft.edgemac","company.thebrowser.Browser","com.vivaldi.Vivaldi","com.operasoftware.Opera","org.chromium.Chromium","com.google.chrome.for.testing","org.mozilla.firefox","ai.perplexity.comet","com.openai.atlas"]
     init() {
         let env = ProcessInfo.processInfo.environment
-        allowed = Set((env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
+        let entries = (env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty }
+        allowed = Set(entries.filter { !$0.hasSuffix(":read") })
+        readable = Set(entries.filter { $0.hasSuffix(":read") }.map { String($0.dropLast(5)) })
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
-        log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
+        log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":Computer.listed(allowed,readable),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
     static let version = "0.4.4"
-    func permit(_ request: [String: Any]) throws -> String {
+    // Methods that change an app. Read-only access refuses them before anything is resolved.
+    static let acting: Set<String> = ["click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
+    static func listed(_ full: Set<String>, _ read: Set<String>) -> [String] { full.sorted() + read.sorted().map { $0 + ":read" } }
+    // An explicit bundle:read entry wins over "*", so one app can stay read-only while the rest are open.
+    func access(_ bundle: String) -> String {
+        if readable.contains(bundle) { return "read" }
+        if allowed.contains(bundle) || allowed.contains("*") { return "full" }
+        return readable.contains("*") ? "read" : "none"
+    }
+    func permit(_ request: [String: Any], acting: Bool = false) throws -> String {
         let bundle = try string(request, "app")
-        guard allowed.contains(bundle) || allowed.contains("*") else { try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.") }
-        return bundle
+        switch access(bundle) {
+        case "none": try fail("APP_NOT_ALLOWED", "Add \(bundle) to OPENCOMPUTER_APPS before starting this process. No apps are allowed by default.")
+        case "read" where acting:
+            throw Failure(code:"READ_ONLY_APP",message:"\(bundle) is allowed read-only: observe, screenshot, readText, and waitFor work, but actions and opening links do not. Nothing was sent.",details:["dispatched":false,"access":"read"])
+        default: return bundle
+        }
     }
     func target(_ request: [String: Any]) throws -> NSRunningApplication {
-        let bundle = try permit(request)
+        let bundle = try permit(request, acting: Computer.acting.contains(request["method"] as? String ?? ""))
         let apps = NSRunningApplication.runningApplications(withBundleIdentifier: bundle).filter { !$0.isTerminated }
         if let pid = request["pid"] as? Int {
             guard let app = apps.first(where: { Int($0.processIdentifier) == pid }) else { try fail("APP_NOT_RUNNING", "No running instance of \(bundle) has pid \(pid). Call apps for current pids.") }
@@ -128,6 +148,8 @@ final class Computer {
         let windows = attribute(applicationRoot,kAXWindowsAttribute) as? [AXUIElement] ?? []
         let main = axElement(attribute(applicationRoot,kAXMainWindowAttribute)) ?? axElement(attribute(applicationRoot,kAXFocusedWindowAttribute))
         let menu = request["menu"] as? Bool ?? false
+        // refresh re-reads into the current snapshot, so ids seen before keep their numbers.
+        let refresh = request["refresh"] as? Bool ?? false
         var request = request
         if let title = request["windowTitle"] as? String, !title.isEmpty {
             guard request["window"] == nil else { try fail("INVALID_ARGUMENT","Use window or windowTitle, not both.") }
@@ -158,7 +180,11 @@ final class Computer {
                 roots = windows.sorted { a, _ in main.map { CFEqual(a,$0) } ?? false }
                 if roots.isEmpty { roots = [applicationRoot] }
             }
-            snapshot = nil
+            if refresh {
+                guard let existing = snapshot, (request["snapshot"] as? String) == existing.id, Date().timeIntervalSince(existing.time) < 300 else {
+                    try fail("STALE_SNAPSHOT","refresh needs the app's current snapshot. Observe without refresh to start a new one.")
+                }
+            } else { snapshot = nil }
         }
         let current = snapshot ?? Snapshot(pid:pid,bundle:app.bundleIdentifier ?? "")
         current.time = Date()
@@ -201,7 +227,7 @@ final class Computer {
                     current.windows[w]?.tabTitle = v[2] as? String ?? ""
                 }
             }
-            current.note(index,parent:parent,place:place)
+            current.note(index,parent:parent,place:place,replace:refresh)
             var seenAs: [String:Any] = ["role":role]
             if !subrole.isEmpty { seenAs["subrole"] = subrole }
             if let name = [v[2],v[3]].compactMap({ $0 as? String }).first(where: { !$0.isEmpty }) { seenAs["label"] = cleanLabel(name,limit:80) }
@@ -220,7 +246,10 @@ final class Computer {
             if v[8] as? Bool == true { node["selected"] = true }
             let text = Computer.textRoles.contains(role)
             node["settable"] = !secure && role != kAXStaticTextRole && (text || v[5] != nil) && isSettable(element,kAXValueAttribute)
-            node["actions"] = role == kAXStaticTextRole ? [] : actionNames(element)
+            let actions = role == kAXStaticTextRole ? [] : actionNames(element)
+            node["actions"] = actions
+            if node["settable"] as? Bool == true || (text && !secure) || actions.contains(where: { Computer.marked.contains($0) }) { current.interactive.insert(index) }
+            if role == kAXMenuItemRole, let shortcut = menuShortcut(element) { node["shortcut"] = shortcut }
             if let p = v[10], let s = v[11], CFGetTypeID(p) == AXValueGetTypeID(), CFGetTypeID(s) == AXValueGetTypeID() {
                 var point = CGPoint.zero; var size = CGSize.zero
                 AXValueGetValue(unsafeBitCast(p, to: AXValue.self), .cgPoint, &point)
@@ -265,7 +294,7 @@ final class Computer {
                     probes += 1
                     var hit: AXUIElement?
                     if AXUIElementCopyElementAtPosition(applicationRoot,Float(x),Float(y),&hit) == .success, let hit,
-                       !current.contains(hit), !found.contains(where: { CFEqual($0.0,hit) }),
+                       !(current.find(hit).map { seen.contains($0) } ?? false), !found.contains(where: { CFEqual($0.0,hit) }),
                        ![kAXWindowRole,kAXApplicationRole].contains(roleOf(hit)) {
                         found.append((hit,elementFrame(hit)?.origin ?? CGPoint(x:x,y:y)))
                     }
@@ -288,6 +317,7 @@ final class Computer {
         if let index = request["window"] as? Int { result["selectedWindow"] = index }
         if webJustEnabled { result["webAccessibilityEnabled"] = true }
         if discovered > 0 { result["hitTestDiscovered"] = discovered }
+        if refresh { result["refreshed"] = true }
         overlay.track(app,element:roots.first.flatMap { owningWindow($0) },action:"Reading window")
         return result
     }
@@ -296,8 +326,27 @@ final class Computer {
         let content = try await captureDeadline { try await SCShareableContent.excludingDesktopWindows(true, onScreenWindowsOnly: false) }
         let windows = content.windows.filter { $0.owningApplication?.processID == app.processIdentifier && $0.windowLayer == 0 && $0.frame.width > 1 && $0.frame.height > 1 }
         guard !windows.isEmpty else { try fail("NO_WINDOW", "No capturable window for this app. Restore a window and try again.") }
+        // region zooms into the window of the most recent screenshot, in that picture's pixels.
+        var zoom: CGRect?
+        let previous = captures[app.processIdentifier]
+        if let region = request["region"] as? [String:Any] {
+            guard let previous else { try fail("SCREENSHOT_REQUIRED","Take a screenshot of this app first; region is in pixels of the most recent screenshot.") }
+            guard let x = (region["x"] as? NSNumber)?.doubleValue, let y = (region["y"] as? NSNumber)?.doubleValue,
+                  let w = (region["width"] as? NSNumber)?.doubleValue, let h = (region["height"] as? NSNumber)?.doubleValue, w >= 1, h >= 1 else {
+                try fail("INVALID_ARGUMENT","region needs x, y, width, and height in pixels of the most recent screenshot.")
+            }
+            _ = try previous.verify(hit:nil)
+            let rect = CGRect(x:previous.origin.x+x/previous.scale,y:previous.origin.y+y/previous.scale,width:w/previous.scale,height:h/previous.scale)
+            let clipped = rect.intersection(CGRect(origin:.zero,size:previous.size))
+            guard !clipped.isNull, clipped.width >= 1, clipped.height >= 1 else { try fail("INVALID_ARGUMENT","The region is outside the captured window.") }
+            zoom = clipped
+        }
         let window: SCWindow
-        if let id = request["windowId"] as? UInt32 {
+        if zoom != nil, let previous {
+            guard let same = windows.first(where: { $0.windowID == previous.window }) else { try fail("NO_WINDOW","The window of the last screenshot is gone. Take a new screenshot.") }
+            if let id = request["windowId"] as? UInt32, id != previous.window { try fail("INVALID_ARGUMENT","region zooms into the window of the most recent screenshot; leave out windowId or pass that window's.") }
+            window = same
+        } else if let id = request["windowId"] as? UInt32 {
             guard let selected = windows.first(where: { $0.windowID == id }) else { try fail("INVALID_WINDOW", "windowId must belong to the allowed app.") }
             window = selected
         } else {
@@ -309,19 +358,38 @@ final class Computer {
             }
             window = candidates[0]
         }
-        overlay.track(app,title:window.title,captureWindowID:window.windowID,captureFrame:window.frame,action:"Capturing window")
+        overlay.track(app,title:window.title,captureWindowID:window.windowID,captureFrame:window.frame,action:zoom == nil ? "Capturing window" : "Zooming into window")
         note?.merge(["window":cleanLabel(window.title ?? "",limit:160)])
         let filter = SCContentFilter(desktopIndependentWindow: window)
         let config = SCStreamConfiguration()
-        let scale = min(1, 1600 / max(window.frame.width, window.frame.height))
-        config.width = max(1, Int(window.frame.width * scale))
-        config.height = max(1, Int(window.frame.height * scale))
+        // A whole window is at most 1600 px on its long side; a zoomed region goes up to the
+        // display's own pixel density, so small text becomes legible.
+        let source = zoom ?? CGRect(origin:.zero,size:window.frame.size)
+        let density: CGFloat = zoom == nil ? 1 : max(1,CGFloat(filter.pointPixelScale))
+        let scale = min(density, 1600 / max(source.width, source.height))
+        if let zoom { config.sourceRect = zoom }
+        config.width = max(1, Int(source.width * scale))
+        config.height = max(1, Int(source.height * scale))
         config.showsCursor = false
         let cgImage = try await captureDeadline { try await SCScreenshotManager.captureImage(contentFilter: filter, configuration: config) }
-        let bitmap = NSBitmapImageRep(cgImage: cgImage)
+        var extra: [String:Any] = [:]
+        if zoom != nil { extra["zoomed"] = true }
+        if request["ocr"] as? Bool == true { extra["lines"] = try recognizeText(cgImage) }
+        var picture = cgImage
+        if request["marks"] as? Bool == true {
+            let crop = CGRect(x:window.frame.minX+source.minX,y:window.frame.minY+source.minY,width:source.width,height:source.height)
+            if let snapshot = snapshots[app.processIdentifier], Date().timeIntervalSince(snapshot.time) < 300 {
+                let marks = self.marks(snapshot,window:window.frame,crop:crop,scale:scale)
+                if let drawn = annotate(cgImage,marks:marks) { picture = drawn; extra["marked"] = marks.count }
+            } else {
+                extra["marked"] = 0
+                extra["marksNote"] = "Observe this app first: marks label the elements of its latest snapshot."
+            }
+        }
+        let bitmap = NSBitmapImageRep(cgImage: picture)
         guard let png = bitmap.representation(using: .png, properties: [:]) else { try fail("CAPTURE_FAILED", "Could not encode screenshot") }
         // The page at the window's centre identifies which tab the picture shows.
-        var capture = Capture(window:window.windowID,scale:scale,title:window.title,size:window.frame.size)
+        var capture = Capture(window:window.windowID,scale:scale,title:window.title,size:window.frame.size,origin:source.origin)
         var hit: AXUIElement?
         if AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(window.frame.midX),Float(window.frame.midY),&hit) == .success, let hit,
            let frame = owningWindow(hit).flatMap({ elementFrame($0) }), abs(frame.minX-window.frame.minX) <= 3, abs(frame.minY-window.frame.minY) <= 3,
@@ -329,7 +397,45 @@ final class Computer {
             capture.page = page; capture.url = pageURL(page)
         }
         captures[app.processIdentifier] = capture
-        return ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "scale": scale, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
+        let result: [String:Any] = ["mimeType": "image/png", "data": png.base64EncodedString(), "width": cgImage.width, "height": cgImage.height, "scale": scale, "windowId": window.windowID, "app": app.bundleIdentifier ?? ""]
+        return result.merging(extra) { a, _ in a }
+    }
+    // Boxes, in screenshot pixels, of the snapshot's pressable and editable elements that
+    // are inside the captured window and region. Window-sized containers are left out.
+    func marks(_ snapshot: Snapshot, window: CGRect, crop: CGRect, scale: CGFloat) -> [Mark] {
+        var marks: [Mark] = []
+        var windowFrames: [Int:CGRect?] = [:]
+        for index in snapshot.interactive.sorted() where marks.count < 300 {
+            if let w = snapshot.places[index]?.window {
+                if windowFrames[w] == nil { windowFrames[w] = .some(elementFrame(snapshot.elements[w])) }
+                guard let frame = windowFrames[w] ?? nil, abs(frame.minX-window.minX) <= 3, abs(frame.minY-window.minY) <= 3 else { continue }
+            }
+            guard let frame = elementFrame(snapshot.elements[index]) else { continue }
+            let visible = frame.intersection(crop)
+            guard !visible.isNull, visible.width >= 3, visible.height >= 3, visible.width*visible.height < crop.width*crop.height*0.5 else { continue }
+            marks.append(Mark(id:index,rect:CGRect(x:(visible.minX-crop.minX)*scale,y:(visible.minY-crop.minY)*scale,width:visible.width*scale,height:visible.height*scale)))
+        }
+        return marks
+    }
+    // The full text of one element, or of everything inside a container, in pages.
+    func readText(_ app: NSRunningApplication, _ request: [String:Any]) throws -> [String:Any] {
+        let element = try resolve(request,app).element
+        let offset = max(0,request["offset"] as? Int ?? 0)
+        let length = min(100_000,max(1,request["length"] as? Int ?? 20_000))
+        var text = ""
+        var source = "value"
+        var partial = false
+        if let value = attribute(element,kAXValueAttribute) as? String, !value.isEmpty { text = value }
+        else {
+            let collected = collectText(element,maxCharacters:offset+length+1,deadline:Date().addingTimeInterval(4))
+            text = collected.text; partial = collected.truncated; source = "contents"
+        }
+        let whole = text as NSString
+        let start = min(offset,whole.length)
+        let range = whole.rangeOfComposedCharacterSequences(for:NSRange(location:start,length:min(length,whole.length-start)))
+        overlay.track(app,element:element,action:"Reading \(label(element))")
+        return ["text":whole.substring(with:range),"offset":range.location,"length":range.length,"totalLength":whole.length,
+                "more":range.location+range.length < whole.length || partial,"source":source]
     }
     // Screenshot pixel -> the element this app has there. The hit test is scoped to the
     // app, so windows of other apps on top of it do not matter and are never read.
@@ -337,7 +443,7 @@ final class Computer {
         guard let capture = captures[app.processIdentifier] else { try fail("SCREENSHOT_REQUIRED","Take a screenshot of this app first; clickPoint coordinates are pixels in the most recent screenshot.") }
         guard let x = (request["x"] as? NSNumber)?.doubleValue, let y = (request["y"] as? NSNumber)?.doubleValue else { try fail("INVALID_ARGUMENT","x and y must be numbers") }
         let bounds = try capture.verify(hit:nil)
-        let point = CGPoint(x:bounds.minX+x/capture.scale,y:bounds.minY+y/capture.scale)
+        let point = CGPoint(x:bounds.minX+capture.origin.x+x/capture.scale,y:bounds.minY+capture.origin.y+y/capture.scale)
         guard bounds.contains(point) else { try fail("INVALID_ARGUMENT","The point is outside the captured window.") }
         var hit: AXUIElement?
         guard AXUIElementCopyElementAtPosition(AXUIElementCreateApplication(app.processIdentifier),Float(point.x),Float(point.y),&hit) == .success, var hit else {
@@ -424,7 +530,8 @@ final class Computer {
         return true
     }
     func open(_ request: [String:Any]) async throws -> [String:Any] {
-        let bundle = try permit(request)
+        // Launching is allowed read-only; opening a link changes what the app shows.
+        let bundle = try permit(request, acting: request["url"] != nil)
         guard let location = NSWorkspace.shared.urlForApplication(withBundleIdentifier:bundle) else { try fail("APP_NOT_FOUND","No installed app has bundle ID \(bundle).") }
         let config = NSWorkspace.OpenConfiguration()
         config.activates = false
@@ -469,7 +576,7 @@ final class Computer {
         let method = try string(request, "method")
         switch method {
         case "status":
-            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": allowed.sorted(), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
+            return ["helperPid":getpid(), "platform": "macOS", "accessibility": AXIsProcessTrusted(), "screenRecording": CGPreflightScreenCaptureAccess(), "allowedApps": Computer.listed(allowed,readable), "frontmostApp": frontmost(), "version": Computer.version, "actionLog": log.path ?? NSNull(), "activity":overlay.state(), "focusProtectionBlocked":false, "focusRestorations":focus.restorations, "waitMs":defaultWait]
         case "configure":
             overlay.configure(try string(request,"agent"))
             return ["agent":overlay.view.agent.name]
@@ -478,18 +585,19 @@ final class Computer {
             return ["released":true]
         case "apps":
             let apps = NSWorkspace.shared.runningApplications.filter { $0.activationPolicy == .regular }.map {
-                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "frontmost": $0.isActive, "hidden": $0.isHidden, "allowed": allowed.contains("*") || allowed.contains($0.bundleIdentifier ?? "")] as [String: Any]
+                ["name": $0.localizedName ?? "", "bundleId": $0.bundleIdentifier ?? "", "pid": $0.processIdentifier, "frontmost": $0.isActive, "hidden": $0.isHidden, "allowed": access($0.bundleIdentifier ?? "") != "none", "access": access($0.bundleIdentifier ?? "")] as [String: Any]
             }
             return ["apps": apps.sorted { ($0["name"] as? String ?? "") < ($1["name"] as? String ?? "") }]
         case "open": return try await open(request)
         default: break
         }
-        guard ["observe", "screenshot", "checkInteraction", "click", "clickPoint", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
+        guard ["observe", "screenshot", "readText", "checkInteraction", "click", "clickPoint", "setValue", "performAction", "pressKey", "typeText", "scroll"].contains(method) else { try fail("UNKNOWN_METHOD", method) }
         let app = try target(request)
         let pid = app.processIdentifier
         if method == "screenshot" { return try await screenshot(app, request) }
         try trusted()
         if method == "observe" { return try await observe(app,request) }
+        if method == "readText" { return try readText(app,request) }
         let elementOptional = ["checkInteraction","pressKey","clickPoint"].contains(method)
         var resolved: (snapshot: Snapshot, index: Int, element: AXUIElement)?
         var item: AXUIElement?

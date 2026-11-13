@@ -6,7 +6,7 @@ import Foundation
 // their query and fragment. Files are private to the user and pruned after 30 days.
 @MainActor
 final class ActionLog {
-    static let methods: Set<String> = ["configure","release","open","observe","screenshot","click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
+    static let methods: Set<String> = ["configure","release","open","observe","screenshot","readText","click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
     private var handle: FileHandle?
     private(set) var path: String?
     private static let clock: ISO8601DateFormatter = { let f = ISO8601DateFormatter(); f.formatOptions = [.withInternetDateTime,.withFractionalSeconds]; return f }()
@@ -43,8 +43,8 @@ final class ActionLog {
 final class Note {
     var fields: [String:Any]
     let started = Date()
-    static let copied = ["app","pid","snapshot","element","root","menu","limit","windowId","x","y","action","keys","count","direction","pages","waitMs","intrusive"]
-    static let kept = ["dispatched","delivery","confirmed","elementFocused","focusChanged","focusRestored","frontmostBefore","frontmostAfter","opened","snapshot","truncated","windowId","selectionRequired","released","agent","target","pressed"]
+    static let copied = ["app","pid","snapshot","element","root","menu","limit","windowId","x","y","action","keys","count","direction","pages","waitMs","intrusive","refresh","marks","ocr","region","offset","length"]
+    static let kept = ["dispatched","delivery","confirmed","elementFocused","focusChanged","focusRestored","frontmostBefore","frontmostAfter","opened","snapshot","truncated","windowId","selectionRequired","released","agent","target","pressed","refreshed","zoomed","marked","totalLength","source"]
     init(_ method: String, _ request: [String:Any]) {
         fields = ["event":method]
         for key in Note.copied { if let value = request[key] { fields[key] = value } }
@@ -64,6 +64,9 @@ final class Note {
     func finish(_ result: [String:Any]) -> [String:Any] {
         for key in Note.kept { if let value = result[key] { fields[key] = value } }
         if let nodes = result["nodes"] as? [Any] { fields["nodeCount"] = nodes.count }
+        // Recognized and read text stay out of the log; only how much there was.
+        if let lines = result["lines"] as? [Any] { fields["ocrLines"] = lines.count }
+        if let text = result["text"] as? String { fields["textLength"] = (text as NSString).length }
         if let windows = result["windows"] as? [[String:Any]], fields["event"] as? String == "observe" {
             fields["windows"] = windows.map { cleanLabel($0["title"] as? String ?? "",limit:120) }
         }
