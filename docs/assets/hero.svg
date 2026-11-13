@@ -1,22 +1,73 @@
 <svg xmlns="http://www.w3.org/2000/svg" width="1280" height="560" viewBox="0 0 1280 560" role="img" aria-labelledby="title desc">
-<title id="title">OpenComputer</title><desc id="desc">Let your agent work. Keep your desktop. Open source background computer control for macOS.</desc>
-<defs><pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#d9decf" stroke-width=".6"/></pattern></defs>
-<rect width="1280" height="560" rx="28" fill="#f4f3e9"/><rect width="1280" height="560" rx="28" fill="url(#grid)"/>
-<rect x="54" y="46" width="171" height="30" rx="15" fill="#dfe6d5"/><text x="70" y="66" fill="#385038" font-family="Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">YOUR MAC. OPEN.</text>
+<title id="title">OpenComputer</title><desc id="desc">Let your agent work. Keep your desktop. Open source background computer control for macOS, with a live activity card, Take over, and a named agent cursor.</desc>
+<defs>
+<pattern id="grid" width="32" height="32" patternUnits="userSpaceOnUse"><path d="M32 0H0V32" fill="none" stroke="#d9decf" stroke-width=".6"/></pattern>
+<radialGradient id="glow" cx="78%" cy="38%" r="55%"><stop offset="0" stop-color="#e5ecd9"/><stop offset="1" stop-color="#f4f3e9" stop-opacity="0"/></radialGradient>
+<filter id="lift" x="-20%" y="-20%" width="140%" height="150%"><feDropShadow dx="0" dy="18" stdDeviation="22" flood-color="#233d2c" flood-opacity=".16"/><feDropShadow dx="0" dy="2" stdDeviation="2" flood-color="#233d2c" flood-opacity=".08"/></filter>
+<filter id="card" x="-20%" y="-20%" width="140%" height="160%"><feDropShadow dx="0" dy="16" stdDeviation="18" flood-color="#0b120d" flood-opacity=".32"/></filter>
+<filter id="pointer" x="-50%" y="-50%" width="200%" height="200%"><feDropShadow dx="0" dy="1.5" stdDeviation="2" flood-color="#000" flood-opacity=".32"/></filter>
+<linearGradient id="agent" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#f2b394"/><stop offset="1" stop-color="#ed996e"/></linearGradient>
+<linearGradient id="wash" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ed996e" stop-opacity=".15"/><stop offset="1" stop-color="#ed996e" stop-opacity="0"/></linearGradient>
+</defs>
+<rect width="1280" height="560" rx="28" fill="#f4f3e9"/><rect width="1280" height="560" rx="28" fill="url(#grid)"/><rect width="1280" height="560" rx="28" fill="url(#glow)"/>
+
+<rect x="54" y="46" width="171" height="30" rx="15" fill="#dfe6d5"/><text x="70" y="66" fill="#385038" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="12" font-weight="700" letter-spacing="2">YOUR MAC. OPEN.</text>
 <text x="54" y="155" fill="#233d2c" font-family="Georgia,serif" font-size="68">OpenComputer</text>
-<text x="57" y="228" fill="#233d2c" font-family="Arial,sans-serif" font-size="35" font-weight="700">Let your agent work.</text>
-<text x="57" y="273" fill="#233d2c" font-family="Arial,sans-serif" font-size="35" font-weight="700">Keep your desktop.</text>
-<text x="58" y="330" fill="#64705d" font-family="Arial,sans-serif" font-size="19">Background app control. A local API.</text>
-<text x="58" y="361" fill="#64705d" font-family="Arial,sans-serif" font-size="19">Bring the agent you already use.</text>
-<rect x="58" y="427" width="113" height="36" rx="18" fill="#233d2c"/><text x="82" y="450" fill="#f4f3e9" font-family="Arial,sans-serif" font-size="14">macOS 14+</text>
-<text x="190" y="450" fill="#4d6549" font-family="Arial,sans-serif" font-size="14">MCP + JavaScript · MIT licensed</text>
-<rect x="683" y="113" width="498" height="331" rx="18" fill="#d7ddcf"/><rect x="667" y="96" width="498" height="331" rx="18" fill="#fcfcf7" stroke="#c9d1bd" stroke-width="2"/>
-<path d="M667 143H1165" stroke="#d7ddcf"/><circle cx="692" cy="120" r="5" fill="#c5a07a"/><circle cx="710" cy="120" r="5" fill="#d4bd83"/><circle cx="728" cy="120" r="5" fill="#96ab83"/>
-<text x="758" y="125" fill="#63715d" font-family="Arial,sans-serif" font-size="13">opencomputer / background session</text>
-<text x="700" y="192" fill="#64705d" font-family="monospace" font-size="14">01  observe(app)</text>
-<rect x="697" y="214" width="439" height="47" rx="9" fill="#eaf0e2"/><text x="714" y="243" fill="#35513b" font-family="monospace" font-size="16">02  setValue(field, "Hello")</text>
-<text x="700" y="298" fill="#64705d" font-family="monospace" font-size="14">03  click(submit)</text>
-<text x="700" y="341" fill="#64705d" font-family="monospace" font-size="14">04  verify(result)</text>
-<rect x="902" y="384" width="239" height="71" rx="13" fill="#233d2c"/><circle cx="925" cy="420" r="5" fill="#a9c58c"/><text x="941" y="425" fill="#f4f3e9" font-family="Arial,sans-serif" font-size="15">Your focus stays yours.</text>
-<text x="58" y="520" fill="#7c8972" font-family="Arial,sans-serif" font-size="11" letter-spacing="2">LOCAL FIRST  /  APP SCOPED  /  OPEN SOURCE</text>
+<text x="57" y="228" fill="#233d2c" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="35" font-weight="700">Let your agent work.</text>
+<text x="57" y="273" fill="#233d2c" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="35" font-weight="700">Keep your desktop.</text>
+<text x="58" y="330" fill="#64705d" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="19">Background app control. A local API.</text>
+<text x="58" y="361" fill="#64705d" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="19">See every step. Take over anytime.</text>
+<rect x="58" y="427" width="113" height="36" rx="18" fill="#233d2c"/><text x="82" y="450" fill="#f4f3e9" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="14">macOS 14+</text>
+<text x="190" y="450" fill="#4d6549" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="14">MCP + JavaScript · MIT licensed</text>
+<text x="58" y="520" fill="#7c8972" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="11" letter-spacing="2">LOCAL FIRST  /  APP SCOPED  /  YOU STAY IN CHARGE</text>
+
+<!-- A background app window the agent is working in -->
+<g transform="translate(-8 30)">
+<g filter="url(#lift)">
+<rect x="612" y="132" width="520" height="352" rx="16" fill="#fcfcf7" stroke="#d3d9c8"/>
+</g>
+<path d="M612 176H1132" stroke="#e1e6d8"/>
+<circle cx="636" cy="154" r="6" fill="#e2a48a"/><circle cx="656" cy="154" r="6" fill="#e3c88e"/><circle cx="676" cy="154" r="6" fill="#a5bd92"/>
+<text x="700" y="159" fill="#63715d" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="13" font-weight="600">New Message</text>
+<g font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="14">
+<text x="644" y="214" fill="#8a9582">To:</text><text x="700" y="214" fill="#2e3f31">team@studio.example</text>
+<path d="M644 230H1100" stroke="#e8ece1"/>
+<text x="644" y="258" fill="#8a9582">Subject:</text><text x="712" y="258" fill="#2e3f31">Friday review notes</text>
+<path d="M644 274H1100" stroke="#e8ece1"/>
+</g>
+<rect x="644" y="300" width="380" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="322" width="420" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="344" width="300" height="9" rx="4.5" fill="#e6ebde"/><rect x="644" y="366" width="350" height="9" rx="4.5" fill="#e6ebde"/>
+<rect x="1004" y="428" width="96" height="34" rx="17" fill="#233d2c"/><text x="1052" y="450" text-anchor="middle" fill="#f4f3e9" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="14" font-weight="600">Send</text>
+
+<!-- The agent's cursor: arrow, ripple, name tag -->
+<circle cx="1040" cy="447" r="17" fill="#ed996e" fill-opacity=".14" stroke="#ed996e" stroke-opacity=".55" stroke-width="2"/>
+<g transform="translate(1040 447)" filter="url(#pointer)">
+<path d="M0 0V17.2L4.4 13.1L7.5 19.8L10.6 18.4L7.6 11.8H13.4Z" transform="scale(1.35)" fill="#fff" stroke="#fff" stroke-width="3.4" stroke-linejoin="round"/>
+<path d="M0 0V17.2L4.4 13.1L7.5 19.8L10.6 18.4L7.6 11.8H13.4Z" transform="scale(1.35)" fill="url(#agent)" stroke="#b9714e" stroke-opacity=".55" stroke-width=".6" stroke-linejoin="round"/>
+<rect x="16" y="27" width="64" height="25" rx="12.5" fill="#ed996e" stroke="#fff" stroke-opacity=".9" stroke-width="2"/>
+<text x="48" y="44" text-anchor="middle" fill="#161616" font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif" font-size="13.5" font-weight="700">Claude</text>
+</g>
+
+</g>
+<!-- The activity card at the top right of the screen -->
+<g filter="url(#card)">
+<rect x="846" y="34" width="372" height="196" rx="20" fill="#16191c"/>
+</g>
+<rect x="846" y="34" width="372" height="196" rx="20" fill="url(#wash)"/>
+<rect x="846.5" y="34.5" width="371" height="195" rx="19.5" fill="none" stroke="#fff" stroke-opacity=".14"/>
+<g font-family="-apple-system,BlinkMacSystemFont,'Helvetica Neue',Arial,sans-serif">
+<rect x="862" y="50" width="34" height="34" rx="9" fill="#4f86f7"/><path d="M869 60l10 7 10-7v14h-20z" fill="none" stroke="#fff" stroke-width="2" stroke-linejoin="round"/>
+<circle cx="893" cy="81" r="11" fill="#16191c"/><circle cx="893" cy="81" r="9" fill="#ed996e"/><text x="893" y="85" text-anchor="middle" fill="#161616" font-size="10" font-weight="800">C</text>
+<text x="910" y="64" font-size="14"><tspan fill="#fff" font-weight="600">Claude</tspan><tspan fill="#fff" fill-opacity=".62"> is using </tspan><tspan fill="#fff" font-weight="600">Mail</tspan></text>
+<text x="910" y="82" fill="#fff" fill-opacity=".62" font-size="12">New Message</text>
+<text x="1202" y="64" text-anchor="end" fill="#fff" fill-opacity=".4" font-size="12" font-weight="500">0:42</text>
+<path d="M862 99.5H1202" stroke="#fff" stroke-opacity=".1"/>
+<path d="M864.5 118.2l2.5 2.5 4.8-5.3" fill="none" stroke="#fff" stroke-opacity=".42" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="882" y="123" fill="#fff" fill-opacity=".62" font-size="12.5">Reading window</text><text x="1202" y="123" text-anchor="end" fill="#fff" fill-opacity=".4" font-size="11">18s</text>
+<path d="M864.5 141.2l2.5 2.5 4.8-5.3" fill="none" stroke="#fff" stroke-opacity=".42" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"/>
+<text x="882" y="146" fill="#fff" fill-opacity=".62" font-size="12.5">Editing “Subject”</text><text x="1202" y="146" text-anchor="end" fill="#fff" fill-opacity=".4" font-size="11">6s</text>
+<circle cx="868" cy="164" r="7" fill="#ed996e" fill-opacity=".22"/><circle cx="868" cy="164" r="3.2" fill="#ed996e"/>
+<text x="882" y="169" fill="#fff" font-size="12.5" font-weight="500">Clicking “Send”</text><text x="1202" y="169" text-anchor="end" fill="#fff" fill-opacity=".4" font-size="11">now</text>
+<circle cx="866" cy="203" r="3.2" fill="#ed996e"/><text x="877" y="207" fill="#fff" fill-opacity=".62" font-size="12" font-weight="500">Working</text>
+<rect x="1110" y="189" width="92" height="28" rx="14" fill="#fff" fill-opacity=".1" stroke="#fff" stroke-opacity=".1"/><text x="1156" y="207.5" text-anchor="middle" fill="#fff" font-size="12.5" font-weight="600">Take over</text>
+</g>
 </svg>
