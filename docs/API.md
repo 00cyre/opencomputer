@@ -131,8 +131,8 @@ The person can stop an agent and approve its consequential actions from the acti
 
 | Error | Meaning | What the agent should do |
 | --- | --- | --- |
-| `PAUSED_BY_USER` | The person pressed **Take over**. Actions and `open` are refused until they press **Resume**; observe and screenshot still work. | Stop acting. Tell the person in chat, and observe again after they resume. |
-| `APPROVAL_PENDING` | `OPENCOMPUTER_CONFIRM` covers this action and the person has not answered yet (`details.retryAfterMs`). The question stays on screen. | Say in chat what you are waiting for, then retry the same call. It runs once after **Allow**. |
+| `PAUSED_BY_USER` | The person pressed **Take over**. Actions and `open` are refused until they press **Resume**; observe and screenshot still work. Resuming drops earlier snapshots. | Stop acting. Tell the person in chat, and observe again after they resume. |
+| `APPROVAL_PENDING` | `OPENCOMPUTER_CONFIRM` covers this action and the person has not answered yet (`details.retryAfterMs`). The question stays on screen. | Say in chat what you are waiting for, then retry the same call. It runs once after the person holds **Allow**. |
 | `APPROVAL_DENIED` | The person pressed **Deny**. | Do not retry. Ask how to proceed. |
 | `APPROVAL_UNAVAILABLE` | Approval is required but `OPENCOMPUTER_OVERLAY=0` hides the card. | Report it; the person must change the configuration. |
 

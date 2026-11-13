@@ -28,7 +28,7 @@ struct ApprovalPolicy {
     /// Words that, as a whole word in a button's label, make a press consequential.
     static let words: Set<String> = [
         "send","pay","buy","purchase","checkout","order","post","publish","tweet","submit",
-        "delete","remove","trash","erase","transfer","withdraw","donate","confirm","approve","subscribe","unsubscribe",
+        "delete","remove","trash","erase","transfer","withdraw","donate","confirm","approve","agree","subscribe","unsubscribe",
     ]
     static let presses: Set<String> = ["AXPress","AXConfirm","AXPick","AXOpen"]
 

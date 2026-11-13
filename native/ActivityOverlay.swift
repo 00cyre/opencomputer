@@ -89,6 +89,8 @@ final class ActivityOverlay {
     var cardHeight: CGFloat = 0
     var masks: [Int:NSImage] = [:]
     var actionTitles: [String] = []
+    /// Called when the person hands control back, so the helper drops snapshots taken before.
+    var onResume: (() -> Void)?
     let pointerLocation: () -> NSPoint
     var sessionURL: URL { registry.appendingPathComponent(sessionID + ".json") }
     init(pointer: @escaping () -> NSPoint = { NSEvent.mouseLocation }) {
@@ -200,7 +202,11 @@ final class ActivityOverlay {
         if let last = view.steps.indices.last, view.steps[last].open { view.steps[last].state = .done }
         view.needsDisplay = true
     }
-    func resume() { paused = false; view.blocked = false; view.needsDisplay = true }
+    func resume() {
+        paused = false; view.blocked = false; view.needsDisplay = true
+        // The person may have changed anything while they had control.
+        onResume?()
+    }
     /// Refuses a mutation while the person has taken over, and shows them how to resume.
     func ensureNotPaused(_ target: NSRunningApplication?) throws {
         guard paused else { return }
@@ -290,11 +296,14 @@ final class ActivityOverlay {
         let expanded = now.timeIntervalSince(lastHover) < 0.25 || view.approval != nil
         if view.expanded != expanded { view.expanded = expanded; animateReveal(to:expanded ? 1 : 0); updateRegistry(force:true) }
         updateRegistry()
-        let titles = view.buttons.map { $0.title }
+        view.advanceHold(now:now)
+        // Assistive apps can stop or decline, never grant: Allow needs a person's held click.
+        let offered = view.buttons.filter { !$0.needsHold }
+        let titles = offered.map { $0.title }
         if titles != actionTitles {
             actionTitles = titles
-            view.setAccessibilityCustomActions(view.buttons.map { button in
-                NSAccessibilityCustomAction(name:button.title) { [weak self] in MainActor.assumeIsolated { self?.press(button) }; return true }
+            view.setAccessibilityCustomActions(offered.map { button in
+                NSAccessibilityCustomAction(name:button.title) { [weak self] in _ = MainActor.assumeIsolated { self?.press(button) }; return true }
             })
         }
         let reveal = currentReveal()

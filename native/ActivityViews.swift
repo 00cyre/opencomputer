@@ -68,11 +68,13 @@ enum CardButton {
         switch self {
         case .takeOver: return "Take over"
         case .resume: return "Resume"
-        case .allow: return "Allow"
+        case .allow: return "Hold to allow"
         case .deny: return "Deny"
         }
     }
     var primary: Bool { self == .allow || self == .resume }
+    /// Granting permission takes a held press; stopping or declining never does.
+    var needsHold: Bool { self == .allow }
 }
 
 /// The activity indicator: three dots that open into a card on hover.
@@ -100,6 +102,9 @@ final class ActivityView: NSView {
     var hovered: CardButton?
     var pressed: CardButton?
     var onButton: ((CardButton) -> Void)?
+    /// When the person started holding Allow; the press counts after `holdDuration`.
+    var holdStarted: Date?
+    static let holdDuration: TimeInterval = 0.5
     private var drawAlpha: CGFloat = 1
 
     override var isFlipped: Bool { true }
@@ -139,12 +144,24 @@ final class ActivityView: NSView {
     }
 
     override func mouseDown(with event: NSEvent) {
-        pressed = button(at:convert(event.locationInWindow,from:nil)); needsDisplay = true
+        pressed = button(at:convert(event.locationInWindow,from:nil))
+        holdStarted = pressed?.needsHold == true ? Date() : nil
+        needsDisplay = true
+    }
+    override func mouseDragged(with event: NSEvent) {
+        // Sliding off a button cancels it, and restarts nothing.
+        if pressed != nil && button(at:convert(event.locationInWindow,from:nil)) != pressed { pressed = nil; holdStarted = nil; needsDisplay = true }
     }
     override func mouseUp(with event: NSEvent) {
         let released = button(at:convert(event.locationInWindow,from:nil))
-        if let button = pressed, button == released { onButton?(button) }
-        pressed = nil; needsDisplay = true
+        if let button = pressed, button == released, !button.needsHold { onButton?(button) }
+        pressed = nil; holdStarted = nil; needsDisplay = true
+    }
+    /// Fires a held button once the hold is long enough. Called every frame.
+    func advanceHold(now: Date = Date()) {
+        guard let started = holdStarted, let button = pressed, button.needsHold, now.timeIntervalSince(started) >= ActivityView.holdDuration else { return }
+        holdStarted = nil; pressed = nil
+        onButton?(button)
     }
     override func draw(_ dirtyRect: NSRect) {
         guard let context = NSGraphicsContext.current?.cgContext else { return }
@@ -250,6 +267,15 @@ final class ActivityView: NSView {
             if button.primary && hovered == button { fill = fill.withAlphaComponent(0.86) }
             if pressed == button { fill = fill.withAlphaComponent(fill.alphaComponent * 0.7) }
             fill.setFill(); path.fill()
+            if button.needsHold, pressed == button, let started = holdStarted {
+                // The hold fills the button from the left.
+                let progress = easeOut(CGFloat(Date().timeIntervalSince(started) / ActivityView.holdDuration))
+                NSGraphicsContext.saveGraphicsState()
+                path.addClip()
+                OverlayTheme.amber.withAlphaComponent(0.85).setFill()
+                NSBezierPath(rect:NSRect(x:frame.minX,y:frame.minY,width:frame.width * progress,height:frame.height)).fill()
+                NSGraphicsContext.restoreGraphicsState()
+            }
             if !button.primary { theme.hairline.setStroke(); path.lineWidth = 1; path.stroke() }
             drawText(button.title,NSRect(x:frame.minX,y:frame.minY + 5,width:frame.width,height:16),ActivityView.buttonFont,button.primary ? theme.onSolid : theme.primary,.center)
         }

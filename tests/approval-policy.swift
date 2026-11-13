@@ -18,6 +18,7 @@ struct ApprovalTests {
         check(sensitive.reason(method:"click",bundle:"x",label:"Sender") == nil,"Whole words only: Sender")
         check(sensitive.reason(method:"click",bundle:"x",label:"Postcard settings") == nil,"Whole words only: Postcard")
         check(sensitive.reason(method:"click",bundle:"x",label:"Open") == nil,"Ordinary buttons run")
+        check(sensitive.reason(method:"click",bundle:"x",label:"I agree to the terms") != nil,"Accepting terms needs approval")
         check(sensitive.reason(method:"setValue",bundle:"x",label:"Send") == nil,"Editing a field labelled Send runs")
         check(sensitive.reason(method:"pressKey",bundle:"x",label:nil,key:"Return") != nil,"Return needs approval")
         check(sensitive.reason(method:"pressKey",bundle:"x",label:nil,key:"cmd+Enter") != nil,"cmd+Enter needs approval")

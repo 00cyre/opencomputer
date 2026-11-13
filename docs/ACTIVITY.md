@@ -8,7 +8,7 @@ The collapsed indicator is a 56 × 30 point glass pill with three dots in the ag
 
 - **Who and where:** the target app's icon with the agent's icon as a badge, "Claude is using Notes", and the window or browser-tab title.
 - **Steps:** the last three operations as a timeline. The current one pulses in the agent's colour, finished ones get a check, and each shows how long ago it started. A new step slides in from below. Elapsed time for the session sits at the top right.
-- **Status and controls:** Working, Waiting for you (amber, with the reason as the current step), Paused, or Needs your OK, next to the buttons that apply: **Take over**, **Resume**, or **Deny** / **Allow**.
+- **Status and controls:** Working, Waiting for you (amber, with the reason as the current step), Paused, or Needs your OK, next to the buttons that apply: **Take over**, **Resume**, or **Deny** / **Hold to allow**.
 
 Leaving the card closes it after a short delay. The glass follows the system's light or dark appearance. For a browser, the title comes from its accessibility window title, which commonly contains the selected tab name; this is not a browser DOM integration.
 
@@ -24,7 +24,7 @@ When a mutation conflicts with your input, the dots turn amber and the current s
 
 ## Take over
 
-**Take over** pauses the session. Until you press **Resume** on the same card, every action and `open` from that agent is refused with `PAUSED_BY_USER` and nothing is sent; observing and screenshots still work, so the agent can see what you changed. The dots become two grey bars while paused. The pause outlives `release`: an agent cannot end it by finishing its session, and if it tries to act again the card reappears with **Resume**. Each helper (each connected agent) has its own pause.
+**Take over** pauses the session. Until you press **Resume** on the same card, every action and `open` from that agent is refused with `PAUSED_BY_USER` and nothing is sent; observing and screenshots still work, so the agent can see what you changed. The dots become two grey bars while paused. Resuming drops the session's snapshots, so the agent's next action answers `STALE_SNAPSHOT` and it has to look again at what you changed. The pause outlives `release`: an agent cannot end it by finishing its session, and if it tries to act again the card reappears with **Resume**. Each helper (each connected agent) has its own pause.
 
 ## Approve before it acts
 
@@ -38,7 +38,7 @@ Set `OPENCOMPUTER_CONFIRM` in the server's environment to have the card ask befo
 
 Entries combine with commas, for example `sensitive,com.apple.MobileSMS`. Unset or `off` asks for nothing.
 
-The card opens by itself with "Claude wants to click “Send”", the app, window, and reason, and **Deny** / **Allow**. The action waits up to about 15 seconds for your answer (less when the request also allows a long `waitMs`, so the whole request stays inside the client's 20-second timeout). Without an answer it returns `APPROVAL_PENDING` with nothing sent and the question stays up; when the agent retries the same call after you press **Allow**, it runs once. **Deny** returns `APPROVAL_DENIED`. An answer applies only to the exact action it was asked about, unanswered questions lapse after two minutes, and approvals nobody used lapse after one. The action log records `approved: true` on actions that ran after your OK.
+The card opens by itself with "Claude wants to click “Send”", the app, window, and reason, and **Deny** / **Hold to allow**. Allow counts only after you hold it for half a second (it fills as you hold); a quick click, sliding off, or anything other than your mouse does nothing. Take over, Resume, and Deny are also offered to VoiceOver as actions on the indicator; Allow deliberately is not, so no assistive or automation tool can grant permission on your behalf. The action waits up to about 15 seconds for your answer (less when the request also allows a long `waitMs`, so the whole request stays inside the client's 20-second timeout). Without an answer it returns `APPROVAL_PENDING` with nothing sent and the question stays up; when the agent retries the same call after you press **Allow**, it runs once. **Deny** returns `APPROVAL_DENIED`. An answer applies only to the exact action it was asked about, unanswered questions lapse after two minutes, and approvals nobody used lapse after one. The action log records `approved: true` on actions that ran after your OK.
 
 Label matching is a heuristic, not an understanding of intent: a button named "Go" that pays will not be caught, and "Remove filter" will be asked about. Use per-app entries for apps where every action matters.
 
@@ -52,7 +52,7 @@ The arrow is a visual annotation. It does not move the real pointer and is not i
 
 ## Focus and settings
 
-Both panels use non-activating AppKit windows, cannot become key/main, and sit above ordinary app windows. The ghost cursor and the collapsed dots ignore mouse events; hover is read from the pointer location, so clicks keep reaching the window underneath. Only the fully open card takes clicks, for its buttons, and pressing one never activates OpenComputer or changes the foreground app. The buttons are also offered to VoiceOver as actions on the indicator. System/security UI can appear above them. Display/Space/full-screen combinations beyond the documented tests remain unverified.
+Both panels use non-activating AppKit windows, cannot become key/main, and sit above ordinary app windows. The ghost cursor and the collapsed dots ignore mouse events; hover is read from the pointer location, so clicks keep reaching the window underneath. Only the fully open card takes clicks, for its buttons, and pressing one never activates OpenComputer or changes the foreground app. Take over, Resume, and Deny are also offered to VoiceOver as actions on the indicator. System/security UI can appear above them. Display/Space/full-screen combinations beyond the documented tests remain unverified.
 
 MCP client identity is detected during initialization. To override it, set `OPENCOMPUTER_AGENT=Claude` or another display name in the server’s environment. Set `OPENCOMPUTER_OVERLAY=0` to disable both visuals; focus protection remains enabled. Without the card there is no Take over button, and actions that `OPENCOMPUTER_CONFIRM` covers fail with `APPROVAL_UNAVAILABLE` instead of waiting for an answer nobody can give. JavaScript equivalents are `{agent: 'Claude', overlay: false}`. Restart the server after configuration changes.
 

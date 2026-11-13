@@ -52,6 +52,8 @@ final class Computer {
         allowed = Set((env["OPENCOMPUTER_APPS"] ?? "").split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }.filter { !$0.isEmpty })
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
         log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":allowed.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
+        // After the person had control, element IDs from before are stale: the agent must look again.
+        overlay.onResume = { [weak self] in self?.snapshots = [:]; self?.captures = [:] }
     }
     static let version = "0.4.4"
     func permit(_ request: [String: Any]) throws -> String {
