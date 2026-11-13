@@ -1,6 +1,6 @@
 {
   "name": "@00cyre/opencomputer",
-  "version": "0.4.4",
+  "version": "0.5.0",
   "description": "App-scoped background computer use for macOS. JavaScript API and local MCP server.",
   "type": "module",
   "exports": "./src/computer.mjs",
@@ -30,7 +30,8 @@
     "test:motion": "bash scripts/test-motion.sh",
     "test:interaction": "bash scripts/test-interaction.sh",
     "test:guard": "node tests/target-guard.mjs",
-    "test:perception": "node tests/perception.mjs"
+    "test:perception": "node tests/perception.mjs",
+    "demo": "node scripts/demo.mjs"
   },
   "engines": {
     "node": ">=22"

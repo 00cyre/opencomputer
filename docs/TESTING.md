@@ -44,6 +44,7 @@ A manual run against a throwaway Chrome for Testing window (separate app and pro
 
 ```sh
 npm run test:perception
+npm run demo               # narrated tour of the same features, paced for a screen recording
 ```
 
 Launches the fixture with a menu bar and checks, through the production helper: read-only access observes but refuses `setValue` with nothing reaching the fixture; `refresh` keeps the snapshot and element IDs and reads the new value; a `marks` screenshot labels the fixture's controls; OCR finds the window's heading; a zoomed `region` around the submit button is captured at least at the original size and `clickPoint` in it submits exactly once; `waitFor` finds the status text the submit produced; `readText` returns the window's text and a field's value; the menu item reports `cmd+shift+k`; `chooseMenu('Tools > Stamp Document')` runs the command once without taking the foreground; `settle` reports that the fixture is watched; `pressKey('cmd+shift+k', {via:'menu'})` presses that menu item and runs the command once more; `verify` confirms the field's value and reports a deviation for a wrong one; click-only access refuses `setValue` with `CLICK_ONLY_APP`; and `release` returns a summary naming the fixture. 27 assertions. Not yet run on a Mac at the time of writing: the code compiles in CI, and the JavaScript side is covered by `npm test`.

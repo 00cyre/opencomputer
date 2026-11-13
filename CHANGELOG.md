@@ -1,8 +1,8 @@
 # Changelog
 
-## Unreleased
+## 0.5.0 — 2026-11-13
 
-Ideas from other computer-use projects, rebuilt for background control on the Mac: verify an action in the same call, wait instead of polling, see what the outline cannot, and let agents look without acting.
+Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app.
 
 - **`changes` on observe and every action.** The server re-reads the app's last scope into the same snapshot and returns only what was added (`+`), removed (`-`), or reads differently (`~`, with what it was). IDs stay valid, so one call acts and verifies. Built on the helper's new `observe` `refresh` mode, which keeps element IDs across re-reads.
 - **`waitFor`.** Re-reads about three times a second until an element matches a query, or with `gone` until none does, then returns the matches with usable IDs, or `WAIT_TIMEOUT`.

@@ -70,7 +70,7 @@ final class Computer {
         defaultWait = min(10000,max(0,Int(env["OPENCOMPUTER_WAIT_MS"] ?? "") ?? 2000))
         log.write(["event":"session","version":Computer.version,"helperPid":getpid(),"clients":ancestry(getppid()),"apps":Computer.listed(allowed,readable,clickable),"hosts":hosts.sorted(),"agent":cleanLabel(env["OPENCOMPUTER_AGENT"] ?? "Agent",limit:100)])
     }
-    static let version = "0.4.4"
+    static let version = "0.5.0"
     // Methods that change an app. Read-only access refuses them before anything is resolved.
     static let acting: Set<String> = ["click","clickPoint","setValue","performAction","pressKey","typeText","scroll"]
     // What bundle:click allows: pressing and scrolling, never text, values, keys, or links.
