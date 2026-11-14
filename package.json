@@ -31,6 +31,7 @@
     "test:interaction": "bash scripts/test-interaction.sh",
     "test:approval": "bash scripts/test-approval.sh",
     "test:guard": "node tests/target-guard.mjs",
+    "test:window": "node tests/window-guard.mjs",
     "test:perception": "node tests/perception.mjs",
     "demo": "node scripts/demo.mjs"
   },

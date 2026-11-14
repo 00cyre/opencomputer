@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **A file chooser no longer pulls you to another window.** When a page asks for a file, Chrome raises that tab's window to show the sheet, so an agent uploading in one Chrome window took you off the tab you were reading in another. App activation never changed, so the focus guard missed it. Now, when the agent works in the app you are using, the window you were in is raised back if another of its windows comes forward without a click or shortcut from you, during the action and for 3 s after (file sheets can appear late). The sheet stays open on its window and the agent keeps working it in the background. `npm run test:window` is a live fixture test (it brings the fixture forward).
+
 ## 0.5.0 — 2026-11-13
 
 Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app. Agents also get a Chrome of their own, and the activity indicator lets the person take over or approve what matters.

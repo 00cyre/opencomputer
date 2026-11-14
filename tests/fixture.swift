@@ -68,6 +68,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
             otherField.frame = NSRect(x:20,y:80,width:320,height:32)
             otherField.setAccessibilityIdentifier("background-input")
             other.contentView!.addSubview(otherField)
+            // Like a page asking for a file in another Chrome window: the sheet raises its window.
+            if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_PANEL_TRAP"] == "1" {
+                let upload = NSButton(title:"Upload",target:self,action:#selector(panelTrap))
+                upload.frame = NSRect(x:20,y:30,width:120,height:32)
+                upload.setAccessibilityIdentifier("panel-trap")
+                other.contentView!.addSubview(upload)
+            }
             other.orderFrontRegardless(); otherWindow = other
         }
         if ProcessInfo.processInfo.environment["OPENCOMPUTER_FIXTURE_TABS"] == "1" {
@@ -134,6 +141,13 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
         panel.orderFrontRegardless(); cover = panel
         DispatchQueue.main.asyncAfter(deadline:.now()+1) { panel.close(); self.cover = nil }
     }
+    @objc func panelTrap() {
+        guard let other = otherWindow else { return }
+        let panel = NSOpenPanel()
+        other.makeKeyAndOrderFront(nil)
+        panel.beginSheetModal(for:other) { _ in }
+        for delay in [0.05,1.0,2.0] { DispatchQueue.main.asyncAfter(deadline:.now()+delay) { self.save() } }
+    }
     @objc func focusTrap() {
         DispatchQueue.main.asyncAfter(deadline:.now()+0.04) {
             NSApp.activate(ignoringOtherApps:true)
@@ -153,7 +167,7 @@ final class Delegate: NSObject, NSApplicationDelegate, NSTextFieldDelegate, NSTa
         save()
     }
     func save() {
-        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"stamps":stamps,"presses":presses,"tab":tabs?.selectedTabViewItem?.label ?? "","title":window?.title ?? "","frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown"]
+        let state: [String:Any] = ["token":field.stringValue,"option":consent.state == .on,"submissions":submissions,"returns":returns,"stamps":stamps,"presses":presses,"tab":tabs?.selectedTabViewItem?.label ?? "","title":window?.title ?? "","frontmostApp":NSWorkspace.shared.frontmostApplication?.bundleIdentifier ?? "unknown","keyWindow":NSApp.keyWindow?.title ?? "","mainWindow":NSApp.mainWindow?.title ?? ""]
         if let data = try? JSONSerialization.data(withJSONObject:state, options:[.prettyPrinted,.sortedKeys]) { try? data.write(to:URL(fileURLWithPath:output), options:.atomic) }
     }
     func applicationShouldTerminateAfterLastWindowClosed(_ sender:NSApplication) -> Bool { true }
