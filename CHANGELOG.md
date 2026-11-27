@@ -1,5 +1,9 @@
 # Changelog
 
+## Unreleased
+
+- **The activity pill hides when the agent goes quiet.** It used to stay in the corner until the agent called `release`, which many never do, so it was on screen for as long as the MCP client ran. It now hides after 20 seconds with no request, unless a request is still running, an approval question or its answer is waiting, or the pointer is on the card, and comes back with the next action. `OPENCOMPUTER_OVERLAY_IDLE` sets the delay in seconds (`0` restores the old behaviour); `status().activity.idleTimeout` reports it.
+
 ## 0.5.0 — 2026-11-13
 
 Ideas from other computer-use projects, rebuilt for background control on the Mac: every action reports what changed and whether it took effect, shortcuts reach background apps through their menus, screenshots show what the outline cannot, and access can be read-only or click-only, never including the agent's own app. Agents also get a Chrome of their own, and the activity indicator lets the person take over or approve what matters.

@@ -27,6 +27,8 @@ struct OverlayUITest {
         var pointer = NSPoint(x:-10000,y:-10000)
         // The production hover branch receives pointer positions without moving the user's cursor.
         let overlay = ActivityOverlay(pointer:{pointer})
+        // The screenshot steps take longer than any idle limit; the idle hide is checked on its own at the end.
+        overlay.idleTimeout = 0
         let fixture = Process()
         fixture.executableURL = URL(fileURLWithPath:FileManager.default.currentDirectoryPath).appendingPathComponent("build/OpenComputer Fixture.app/Contents/MacOS/fixture")
         let dir = URL(fileURLWithPath:CommandLine.arguments.dropFirst().first ?? "work/overlay-ui",isDirectory:true)
@@ -135,6 +137,33 @@ struct OverlayUITest {
                 try check(!overlay.view.expanded,"The card closes once answered")
                 overlay.release()
                 try check(!overlay.panel.isVisible && !overlay.ghost.isVisible,"Release removes all UI")
+                // An agent that never calls release must not leave the pill in the corner.
+                try check(ActivityOverlay.idleSetting(nil) == 20 && ActivityOverlay.idleSetting("0") == 0 && ActivityOverlay.idleSetting("5") == 5 && ActivityOverlay.idleSetting("soon") == 20,"OPENCOMPUTER_OVERLAY_IDLE parses with a 20 s default")
+                pointer = NSPoint(x:-10000,y:-10000)
+                overlay.idleTimeout = 0.6
+                overlay.track(target,action:"Reading window")
+                try check(overlay.panel.isVisible,"Activity shows the pill")
+                try await waitUntil { !overlay.active }
+                try check(!overlay.active && !overlay.panel.isVisible && !overlay.ghost.isVisible,"The pill hides by itself once the agent goes quiet")
+                overlay.begin()
+                overlay.track(target,action:"Waiting on a slow action")
+                try await Task.sleep(nanoseconds:1_200_000_000)
+                try check(overlay.active && overlay.panel.isVisible,"A request still running keeps the pill up")
+                overlay.end()
+                try await waitUntil { !overlay.active }
+                try check(!overlay.panel.isVisible,"The pill hides once that request ends and nothing follows")
+                overlay.track(target,action:"Clicking Send")
+                _ = await overlay.requestApproval(key:"idle-question",title:"Claude wants to click “Send”",detail:"",wait:0.1)
+                try await Task.sleep(nanoseconds:1_200_000_000)
+                try check(overlay.active && overlay.view.approval != nil,"An unanswered question keeps the card up")
+                overlay.press(.deny)
+                try await Task.sleep(nanoseconds:1_200_000_000)
+                try check(overlay.active,"An answer the agent has not picked up yet keeps the card up")
+                let answer = await overlay.requestApproval(key:"idle-question",title:"Claude wants to click “Send”",detail:"",wait:0.1)
+                try check(answer == .denied,"The agent's retry still gets the answer after a quiet spell")
+                pointer = NSPoint(x:-10000,y:-10000)
+                try await waitUntil { !overlay.active }
+                try check(!overlay.panel.isVisible,"Once the answer is picked up the pill hides")
                 print("{\"passed\":\(checks),\"hoverExpanded\":true,\"dotsAnimated\":true,\"focusPreserved\":true}")
                 overlay.shutdown(); fixture.terminate(); app.terminate(nil)
             } catch {

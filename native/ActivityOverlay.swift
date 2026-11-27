@@ -76,6 +76,13 @@ final class ActivityOverlay {
     var ghostMotion = GhostMotion()
     var lastGhostX: CGFloat?
     var enabled = ProcessInfo.processInfo.environment["OPENCOMPUTER_OVERLAY"] != "0"
+    /// Seconds without a request before the indicator hides by itself; 0 keeps it up until `release`.
+    /// Agents often end a task without calling release, and the helper lives as long as the MCP client,
+    /// so without this the pill would sit in the corner for the rest of the client's session.
+    var idleTimeout: TimeInterval = ActivityOverlay.idleSetting(ProcessInfo.processInfo.environment["OPENCOMPUTER_OVERLAY_IDLE"])
+    var lastActivity = Date()
+    /// Requests in flight. A long wait (an approval, a slow action) never counts as idle.
+    var busy = 0
     var registryReady = false
     /// The person pressed Take over: mutations are refused until they press Resume.
     /// Survives release, so an agent cannot end the pause by finishing its session.
@@ -120,6 +127,12 @@ final class ActivityOverlay {
         configure(ProcessInfo.processInfo.environment["OPENCOMPUTER_AGENT"] ?? "Agent")
         timer = Timer.scheduledTimer(withTimeInterval:1.0/60.0,repeats:true) { [weak self] _ in MainActor.assumeIsolated { self?.tick() } }
     }
+    static func idleSetting(_ value: String?) -> TimeInterval {
+        guard let value = value, let seconds = Double(value.trimmingCharacters(in:.whitespaces)), seconds.isFinite, seconds >= 0 else { return 20 }
+        return seconds
+    }
+    func begin() { busy += 1; lastActivity = Date() }
+    func end() { busy = max(0,busy - 1); lastActivity = Date() }
     func configure(_ label: String) {
         view.agent = AgentIdentity(label); view.agentIcon = view.agent.icon
         ghostView.tint = view.agent.color; ghostView.name = view.agent.name
@@ -128,7 +141,7 @@ final class ActivityOverlay {
     func track(_ target: NSRunningApplication, element: AXUIElement? = nil, title: String? = nil, captureWindowID: CGWindowID? = nil, captureFrame: CGRect? = nil, action: String) {
         let changed = app?.processIdentifier != target.processIdentifier
         if !active { view.startedAt = Date(); view.steps = [] }
-        app = target; active = true
+        app = target; active = true; lastActivity = Date()
         view.appName = cleanLabel(target.localizedName ?? target.bundleIdentifier ?? "App",limit:50)
         if changed { view.appIcon = target.bundleURL.map { NSWorkspace.shared.icon(forFile:$0.path) }; pointOffset = nil; window = nil; windowID = nil }
         let root = AXUIElementCreateApplication(target.processIdentifier)
@@ -292,6 +305,13 @@ final class ActivityOverlay {
         // Polling the pointer gives hover behavior without the dots ever taking a click.
         let pointer = pointerLocation()
         if panel.isVisible && panel.frame.insetBy(dx:-5,dy:-5).contains(pointer) { lastHover = now }
+        // Nothing has happened for a while: the task is over even if the agent never called release.
+        // Kept up while a request runs, a question waits for an answer (or for the agent's retry to pick
+        // the answer up), or the pointer is on the card. A pause survives this like it survives release:
+        // the card comes back with Resume if the agent acts again.
+        if idleTimeout > 0, busy == 0, approvals.current == nil, now.timeIntervalSince(lastActivity) > idleTimeout, now.timeIntervalSince(lastHover) > 1 {
+            release(); return
+        }
         // An approval question opens the card by itself; otherwise hover opens it.
         let expanded = now.timeIntervalSince(lastHover) < 0.25 || view.approval != nil
         if view.expanded != expanded { view.expanded = expanded; animateReveal(to:expanded ? 1 : 0); updateRegistry(force:true) }
@@ -377,7 +397,7 @@ final class ActivityOverlay {
         ["enabled":enabled,"active":active,"agent":view.agent.name,"app":app?.bundleIdentifier ?? "", "action":view.action,"windowTitle":view.windowTitle,
          "pillVisible":panel.isVisible,"ghostVisible":ghost.isVisible,"ghostFloating":ghost.isVisible && ghostMotion.isFloating(at:Date.timeIntervalSinceReferenceDate),"ghostReason":ghostReason,"expanded":view.expanded,"stackRow":row,
          "nonActivating":!panel.canBecomeKey && !panel.canBecomeMain && !ghost.canBecomeKey,
-         "paused":paused,"approvalPending":approvals.pending != nil,"steps":view.steps.count,"controlsInteractive":!panel.ignoresMouseEvents,
+         "paused":paused,"idleTimeout":idleTimeout,"approvalPending":approvals.pending != nil,"steps":view.steps.count,"controlsInteractive":!panel.ignoresMouseEvents,
          "clickThrough":panel.ignoresMouseEvents && ghost.ignoresMouseEvents,
          "pillWindowId":panel.windowNumber,"ghostWindowId":ghost.windowNumber,
          "pillFrame":["screenY":(NSScreen.screens.first?.frame.maxY ?? 0)-panel.frame.maxY,"x":panel.frame.minX,"y":panel.frame.minY,"width":panel.frame.width,"height":panel.frame.height],

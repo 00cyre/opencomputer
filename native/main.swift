@@ -760,6 +760,7 @@ final class Computer {
     var note: Note?
     func handle(_ request: [String: Any]) async throws -> [String: Any] {
         let method = request["method"] as? String ?? ""
+        overlay.begin(); defer { overlay.end() }
         guard ActionLog.methods.contains(method) else { return try await dispatch(request) }
         let note = Note(method,request)
         self.note = note
