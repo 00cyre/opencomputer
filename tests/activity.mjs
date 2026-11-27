@@ -6,6 +6,8 @@ import {join,resolve} from 'node:path';
 import {createInterface} from 'node:readline';
 import {createComputer} from '../src/computer.mjs';
 const preview=process.argv[2]==='--preview';
+// The preview waits for typed commands, longer than the pill's idle hide.
+if(preview)process.env.OPENCOMPUTER_OVERLAY_IDLE??='0';
 const outputDir=resolve(process.argv[3]??'work/activity');
 const dir=await mkdtemp(join(tmpdir(),'opencomputer-activity-'));
 const resultPath=join(dir,'fixture.json');
